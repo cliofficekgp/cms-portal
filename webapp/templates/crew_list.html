@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CMS Crew List</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .sortable { cursor: pointer; }
+        .sortable:hover { background-color: #f1f5f9; }
+        th { user-select: none; }
+        .sort-icon { display: inline-block; width: 12px; height: 12px; margin-left: 4px; opacity: 0.3; }
+        .asc .sort-icon { opacity: 1; transform: rotate(180deg); }
+        .desc .sort-icon { opacity: 1; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4">
+
+    <div class="mx-auto bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
+        <!-- Header -->
+        <div class="bg-indigo-600 px-6 py-4 border-b border-gray-200 flex justify-between items-center text-white">
+            <div>
+                <h2 class="text-xl font-bold flex items-center">
+                    <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    Crew List Monitor
+                </h2>
+                <p class="text-xs text-indigo-200 mt-1" id="refreshTimerText">Next auto-refresh in 5:00</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="saveStatus" class="text-xs font-medium px-2 py-1 bg-white/20 rounded hidden">Saving...</span>
+                <a href="/admin" class="text-sm font-medium text-indigo-200 hover:text-white transition-colors">Admin</a>
+                <a href="/admin/logout" class="text-sm font-medium bg-red-500/40 hover:bg-red-500/60 text-white px-3 py-2 rounded-lg transition-colors">Logout</a>
+            </div>
+        </div>
+
+        <!-- Controls (Search & Export) -->
+        <div class="bg-white px-6 py-3 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+            <div class="relative w-64">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <input type="text" id="searchInput" class="block w-full pl-10 pr-3 py-1.5 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Search crews...">
+            </div>
+            <div>
+                <button onclick="exportTableToCSV('crew_list.csv')" class="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <svg class="w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    Export Excel
+                </button>
+            </div>
+        </div>
+
+        <!-- Table Container -->
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider sticky top-0 shadow-sm z-10">
+                    <tr>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="0">Crew ID <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="1">Name <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="2">Sign On <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="3">PDD <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="4">Duty Hrs <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="5">From Stn <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="6">To Stn <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="7">Loco No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="8">Train No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="9">BPC No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="10">Location <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="11">CTO Time <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="12">Relief <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="13">Found in NS? <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200 text-xs" id="tableBody">
+                    {% for crew in crew_list %}
+                    {% set base_bg = 'bg-red-100/60' if crew.ingest_miss_count >= 3 else ('bg-amber-100/60' if crew.is_relief == 1 else '') %}
+                    <tr class="transition-colors hover:bg-gray-100 {{ 'bg-indigo-300 font-semibold' if crew.found_in_ns == 'yes' else base_bg }}">
+                        <td class="px-2 py-1.5 font-medium text-gray-900 whitespace-nowrap">{{ crew.crew_id }}</td>
+                        <td class="px-2 py-1.5 text-gray-800 truncate max-w-[120px]" title="{{ crew.name }}">{{ crew.name }}</td>
+                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.sign_on_time }}</td>
+                        <td class="px-2 py-1.5 text-red-600 font-bold whitespace-nowrap">{{ crew.pdd }}</td>
+                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.duty_hrs if crew.duty_hrs else '-' }}</td>
+                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.from_sttn }}</td>
+                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.to_sttn if crew.to_sttn else '-' }}</td>
+                        <td class="px-2 py-1.5 text-gray-700">{{ crew.loco_no if crew.loco_no else '-' }}</td>
+                        <td class="px-2 py-1.5 text-gray-700">{{ crew.train_no if crew.train_no else '-' }}</td>
+                        <td class="px-2 py-1.5 text-gray-700">{{ crew.bpc_no if crew.bpc_no else '-' }}</td>
+                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.current_location if crew.current_location else '-' }}</td>
+                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.cto_time if crew.cto_time else '-' }}</td>
+                        <td class="px-2 py-1.5 text-amber-800 whitespace-nowrap">
+                            {% if crew.is_relief == 1 %}
+                                <div class="font-bold">{{ crew.relief_station }}</div>
+                                <div class="text-[10px]">{{ crew.relief_datetime }}</div>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="px-2 py-1.5 text-center" data-val="{{ '1' if crew.found_in_ns == 'yes' else '0' }}">
+                            <input type="checkbox" class="ns-checkbox w-3.5 h-3.5 text-indigo-600 bg-gray-100 border-gray-400 rounded focus:ring-indigo-500 cursor-pointer" 
+                                data-crew="{{ crew.crew_id }}" data-is-relief="{{ crew.is_relief }}" {% if crew.found_in_ns == 'yes' %}checked{% endif %}>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not crew_list %}
+                    <tr>
+                        <td colspan="13" class="px-4 py-8 text-center text-gray-500 font-medium">No crew records found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // --- Color Toggling ---
+        document.querySelectorAll('.ns-checkbox').forEach(cb => {
+            cb.addEventListener('change', function() {
+                const tr = this.closest('tr');
+                const td = this.closest('td');
+                const isRelief = this.dataset.isRelief === "1";
+                if (this.checked) {
+                    tr.classList.remove('bg-amber-100/60');
+                    tr.classList.add('bg-indigo-300', 'font-semibold');
+                    td.setAttribute('data-val', '1');
+                } else {
+                    tr.classList.remove('bg-indigo-300', 'font-semibold');
+                    if(isRelief) tr.classList.add('bg-amber-100/60');
+                    td.setAttribute('data-val', '0');
+                }
+            });
+        });
+
+        // --- Auto-Save & Refresh Logic ---
+        const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+        let timeRemaining = REFRESH_INTERVAL_MS / 1000;
+        
+        function updateTimerUI() {
+            timeRemaining--;
+            if (timeRemaining <= 0) return;
+            const m = Math.floor(timeRemaining / 60);
+            const s = timeRemaining % 60;
+            document.getElementById('refreshTimerText').textContent = `Next auto-refresh in ${m}:${s.toString().padStart(2, '0')}`;
+        }
+        setInterval(updateTimerUI, 1000);
+
+        async function saveAndRefresh() {
+            document.getElementById('saveStatus').classList.remove('hidden');
+            
+            const payload = {};
+            document.querySelectorAll('.ns-checkbox').forEach(cb => {
+                payload[cb.dataset.crew] = cb.checked ? 'yes' : 'no';
+            });
+
+            try {
+                await fetch('/api/save_ns_status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } catch (err) {
+                console.error("Save failed:", err);
+            }
+            
+            location.reload();
+        }
+
+        setTimeout(saveAndRefresh, REFRESH_INTERVAL_MS);
+
+        // --- Table Sorting Logic ---
+        const getCellValue = (tr, idx) => tr.children[idx].innerText || tr.children[idx].textContent || tr.children[idx].getAttribute('data-val') || '';
+        const comparer = (idx, asc) => (a, b) => ((v1, v2) => 
+            v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? v1 - v2 : v1.toString().localeCompare(v2)
+        )(getCellValue(asc ? a : b, idx), getCellValue(asc ? b : a, idx));
+
+        document.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', (() => {
+            const table = th.closest('table');
+            const tbody = table.querySelector('tbody');
+            // Remove icon classes
+            table.querySelectorAll('th').forEach(th_o => { 
+                if (th_o !== th) { th_o.classList.remove('asc', 'desc'); }
+            });
+
+            // Toggle asc/desc
+            let asc = true;
+            if (th.classList.contains('asc')) {
+                th.classList.remove('asc');
+                th.classList.add('desc');
+                asc = false;
+            } else {
+                th.classList.remove('desc');
+                th.classList.add('asc');
+            }
+
+            Array.from(tbody.querySelectorAll('tr'))
+                .sort(comparer(Array.from(th.parentNode.children).indexOf(th), asc))
+                .forEach(tr => tbody.appendChild(tr));
+        })));
+
+        // --- Search Functionality ---
+        document.getElementById('searchInput').addEventListener('keyup', function() {
+            let filter = this.value.toLowerCase();
+            let rows = document.querySelectorAll('#tableBody tr');
+            rows.forEach(row => {
+                if (row.querySelector('td[colspan]')) return; // skip empty message row
+                let text = row.innerText.toLowerCase();
+                row.style.display = text.includes(filter) ? '' : 'none';
+            });
+        });
+
+        // --- Export CSV ---
+        function exportTableToCSV(filename) {
+            let csv = [];
+            let rows = document.querySelectorAll("table tr");
+            
+            for (let i = 0; i < rows.length; i++) {
+                if (rows[i].style.display === 'none' || rows[i].querySelector('td[colspan]')) continue;
+                
+                let row = [], cols = rows[i].querySelectorAll("td, th");
+                for (let j = 0; j < cols.length; j++) {
+                    // avoid checkbox HTML
+                    if(j === 13) {
+                        row.push(cols[j].querySelector('input') ? (cols[j].querySelector('input').checked ? 'Yes' : 'No') : 'Found in NS?');
+                        continue;
+                    }
+                    let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/"/g, '""');
+                    row.push('"' + data + '"');
+                }
+                csv.push(row.join(","));
+            }
+
+            let csvFile = new Blob([csv.join("\n")], {type: "text/csv"});
+            let downloadLink = document.createElement("a");
+            downloadLink.download = filename;
+            downloadLink.href = window.URL.createObjectURL(csvFile);
+            downloadLink.style.display = "none";
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+        }
+    </script>
+</body>
+</html>

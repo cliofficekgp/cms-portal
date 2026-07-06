@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPC Number Report (Last 30 Days)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+    <!-- Header -->
+    <header class="bg-indigo-600 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center text-white">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                BPC Number Reports
+            </h1>
+            <div class="flex gap-4">
+                <a href="/admin" class="text-indigo-100 hover:text-white transition-colors">Back to Admin</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        
+        <!-- Table 1: Missing BPC completely -->
+        <div class="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 bg-red-50 flex justify-between items-center">
+                <div>
+                    <h2 class="text-lg font-semibold text-red-800">Crew Missing BPC Number Completely</h2>
+                    <p class="text-sm text-red-600 mt-1">Crew members who submitted forms in the last 30 days but never entered a BPC number.</p>
+                </div>
+                <button onclick="exportTableToCSV('missing_bpc_table', 'Missing_BPC_Report.csv')" class="inline-flex items-center px-3 py-1.5 border border-red-300 shadow-sm text-sm font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none">
+                    Export Excel
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200" id="missing_bpc_table">
+                    <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                        <tr>
+                            <th class="px-6 py-3 text-left font-medium">Crew ID</th>
+                            <th class="px-6 py-3 text-left font-medium">Name</th>
+                            <th class="px-6 py-3 text-left font-medium">Designation</th>
+                            <th class="px-6 py-3 text-left font-medium">Total Duties (30 Days)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200 text-sm">
+                        {% for row in zero_bpc %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-3 font-medium text-gray-900">{{ row.crew_id }}</td>
+                            <td class="px-6 py-3 text-gray-700">{{ row.name }}</td>
+                            <td class="px-6 py-3 text-gray-700">{{ row.desig }}</td>
+                            <td class="px-6 py-3 text-gray-700">{{ row.total }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="px-6 py-8 text-center text-gray-500">No records found. All crews entered BPC at least once!</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Table 2: All Crew Stats -->
+        <div class="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 bg-indigo-50 flex justify-between items-center">
+                <div>
+                    <h2 class="text-lg font-semibold text-indigo-800">Overall BPC Submission Stats</h2>
+                    <p class="text-sm text-indigo-600 mt-1">Total forms vs forms with BPC number in the last 30 days for each crew member.</p>
+                </div>
+                <button onclick="exportTableToCSV('all_stats_table', 'All_BPC_Stats.csv')" class="inline-flex items-center px-3 py-1.5 border border-indigo-300 shadow-sm text-sm font-medium rounded text-indigo-700 bg-white hover:bg-indigo-100 focus:outline-none">
+                    Export Excel
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200" id="all_stats_table">
+                    <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                        <tr>
+                            <th class="px-6 py-3 text-left font-medium">Crew ID</th>
+                            <th class="px-6 py-3 text-left font-medium">Name</th>
+                            <th class="px-6 py-3 text-left font-medium">Designation</th>
+                            <th class="px-6 py-3 text-left font-medium">Total Duties (30 Days)</th>
+                            <th class="px-6 py-3 text-left font-medium">Duties WITH BPC</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200 text-sm">
+                        {% for row in all_bpc_stats %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-3 font-medium text-gray-900">{{ row.crew_id }}</td>
+                            <td class="px-6 py-3 text-gray-700">{{ row.name }}</td>
+                            <td class="px-6 py-3 text-gray-700">{{ row.desig }}</td>
+                            <td class="px-6 py-3 text-gray-700">{{ row.total }}</td>
+                            <td class="px-6 py-3 text-gray-700">{{ row.with_bpc }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function exportTableToCSV(tableId, filename) {
+            let csv = [];
+            let rows = document.querySelectorAll("#" + tableId + " tr");
+            
+            for (let i = 0; i < rows.length; i++) {
+                if (rows[i].querySelector('td[colspan]')) continue;
+                let row = [], cols = rows[i].querySelectorAll("td, th");
+                for (let j = 0; j < cols.length; j++) {
+                    let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/"/g, '""');
+                    row.push('"' + data + '"');
+                }
+                csv.push(row.join(","));
+            }
+
+            let csvFile = new Blob([csv.join("\n")], {type: "text/csv"});
+            let downloadLink = document.createElement("a");
+            downloadLink.download = filename;
+            downloadLink.href = window.URL.createObjectURL(csvFile);
+            downloadLink.style.display = "none";
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+        }
+    </script>
+</body>
+</html>

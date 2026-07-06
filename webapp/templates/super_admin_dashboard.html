@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin Dashboard — CMS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass { background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 1rem; }
+        .badge-admin { background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; }
+        .badge-super { background: rgba(245,158,11,0.2); border: 1px solid rgba(245,158,11,0.4); color: #fcd34d; }
+        .badge-used { background: rgba(74,222,128,0.15); color: #86efac; }
+        .badge-unused { background: rgba(251,191,36,0.15); color: #fde68a; }
+        .btn-danger { background: linear-gradient(135deg, #dc2626, #ef4444); transition: all 0.2s; }
+        .btn-danger:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(239,68,68,0.4); }
+        .btn-gen { background: linear-gradient(135deg, #059669, #10b981); transition: all 0.2s; }
+        .btn-gen:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(16,185,129,0.4); }
+        .copy-btn { cursor: pointer; transition: color 0.2s; }
+        .copy-btn:hover { color: #a5b4fc; }
+    </style>
+</head>
+<body class="min-h-screen" style="background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);">
+
+    <!-- Navbar -->
+    <nav class="glass border-b border-white/10 sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #f59e0b, #d97706)">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+                    </svg>
+                </div>
+                <span class="text-white font-bold text-lg">Super Admin Panel</span>
+                <span class="badge-super text-xs px-2 py-0.5 rounded-full font-medium">SUPER ADMIN</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <a href="/admin" class="text-sm text-indigo-300 hover:text-white transition-colors">Admin Dashboard</a>
+                <a href="/crew_list" class="text-sm text-indigo-300 hover:text-white transition-colors">Crew List</a>
+                <a href="/admin/logout" class="text-sm px-4 py-2 rounded-lg bg-red-900/40 text-red-300 hover:bg-red-800/50 transition-colors">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-6xl mx-auto px-6 py-10">
+
+        <!-- Welcome Banner -->
+        <div class="card p-6 mb-8 flex items-center gap-4">
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #f59e0b, #d97706)">
+                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                </svg>
+            </div>
+            <div>
+                <h2 class="text-xl font-bold text-white">Welcome, Super Admin</h2>
+                <p class="text-sm text-gray-400">Manage admin users, generate signup passcodes, and reset passwords.</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            <!-- User Management -->
+            <div class="card p-6">
+                <h3 class="text-lg font-semibold text-white mb-5 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+                    </svg>
+                    Admin Users
+                </h3>
+                <div class="space-y-3">
+                    {% for user in users %}
+                    <div class="flex items-center justify-between p-3 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08)">
+                        <div class="flex items-center gap-3">
+                            <div class="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold text-white" style="background: linear-gradient(135deg, #6366f1, #8b5cf6)">
+                                {{ user['username'][0].upper() }}
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium text-white">{{ user['username'] }}</p>
+                                <span class="text-xs {% if user['role'] == 'super_admin' %}badge-super{% else %}badge-admin{% endif %} px-2 py-0.5 rounded-full">{{ user['role'] | replace('_', ' ') | title }}</span>
+                            </div>
+                        </div>
+                        {% if user['role'] != 'super_admin' %}
+                        <form method="POST" action="/super_admin/reset_password/{{ user['id'] }}"
+                              onsubmit="return confirm('Reset password for {{ user['username'] }}? They will need to set a new password on next login.')">
+                            <button type="submit" id="reset-{{ user['id'] }}" class="btn-danger text-xs text-white px-3 py-1.5 rounded-lg font-medium">
+                                Reset PW
+                            </button>
+                        </form>
+                        {% else %}
+                        <span class="text-xs text-gray-500 italic">Protected</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Passcode Management -->
+            <div class="card p-6">
+                <div class="flex items-center justify-between mb-5">
+                    <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+                        </svg>
+                        Signup Passcodes
+                    </h3>
+                    <form method="POST" action="/super_admin/generate_passcode">
+                        <button type="submit" id="gen-passcode-btn" class="btn-gen text-xs text-white px-4 py-2 rounded-lg font-semibold">
+                            + Generate
+                        </button>
+                    </form>
+                </div>
+                <div class="space-y-2">
+                    {% if not passcodes %}
+                    <p class="text-sm text-gray-500 text-center py-4">No passcodes generated yet. Click "Generate" to create one for a new admin.</p>
+                    {% endif %}
+                    {% for pc in passcodes %}
+                    <div class="flex items-center justify-between p-3 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08)">
+                        <div class="flex items-center gap-3">
+                            <code class="text-sm font-mono font-bold {% if pc['is_used'] %}text-gray-500 line-through{% else %}text-green-300{% endif %}">
+                                {{ pc['passcode'] }}
+                            </code>
+                            {% if not pc['is_used'] %}
+                            <button type="button" class="copy-btn text-gray-400 text-xs" onclick="navigator.clipboard.writeText('{{ pc['passcode'] }}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1500)">
+                                Copy
+                            </button>
+                            {% endif %}
+                        </div>
+                        <span class="text-xs font-medium px-2 py-0.5 rounded-full {% if pc['is_used'] %}badge-used{% else %}badge-unused{% endif %}">
+                            {% if pc['is_used'] %}Used{% else %}Available{% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+</body>
+</html>

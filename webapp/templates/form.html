@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crew Duty Report — {{ crew_id }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .bg-gradient { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); }
+    .pulse-icon { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .5; transform: scale(1.1); }
+    }
+  </style>
+</head>
+<body class="bg-gradient min-h-screen">
+  
+  <!-- Top Bar -->
+  <nav class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center text-blue-600 font-bold text-lg tracking-tight">
+          <svg width="24" height="24" viewBox="0 0 36 36" fill="none" class="mr-2">
+            <circle cx="18" cy="18" r="16" stroke="currentColor" stroke-width="2"/>
+            <rect x="14" y="14" width="10" height="10" rx="1.5" fill="currentColor"/>
+            <circle cx="18" cy="19" r="2" fill="#0f172a"/>
+          </svg>
+          CMS Portal
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-gray-100 text-gray-800 border border-gray-200">
+            {{ crew_id }}
+          </span>
+          {% if manual %}
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Manual</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+      
+      <div class="bg-slate-800 px-6 py-4 border-b border-gray-200">
+        <h2 class="text-xl font-semibold text-white">Duty Report</h2>
+        <p class="text-sm text-slate-300 mt-1">
+          {% if crew %}Auto-populated from CMS — complete missing details.{% else %}Manual Entry — please fill in all details.{% endif %}
+        </p>
+      </div>
+
+      <form action="/submit" method="POST" class="p-6 space-y-8" id="dutyForm">
+        <input type="hidden" name="crew_id" value="{{ crew_id }}">
+        
+        <!-- 1. Crew Info -->
+        <section>
+          <h3 class="text-base font-semibold text-gray-900 flex items-center mb-4">
+            <span class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-0.5 rounded-full mr-2">1</span>
+            Crew Details
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Name</label>
+              <input type="text" name="name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 border p-2 text-gray-600"
+                value="{{ crew.name if crew else '' }}" {% if crew %}readonly{% endif %} placeholder="Crew Name">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Sign On Time <span class="text-xs text-blue-600 font-normal ml-1 border border-blue-200 bg-blue-50 px-1 rounded">CMS</span></label>
+              <input type="text" name="sign_on_time" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 border p-2 text-gray-600"
+                value="{{ crew.sign_on_time if crew else '' }}" {% if crew %}readonly{% endif %} placeholder="DD-MM-YYYY HH:MM">
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. Journey -->
+        <section class="border-t pt-8">
+          <h3 class="text-base font-semibold text-gray-900 flex items-center mb-4">
+            <span class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-0.5 rounded-full mr-2">2</span>
+            Journey Details
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">From Station <span class="text-xs text-blue-600 font-normal ml-1 border border-blue-200 bg-blue-50 px-1 rounded">CMS</span></label>
+              <input type="text" name="from_sttn" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 border p-2 text-gray-600 uppercase"
+                value="{{ crew.from_sttn if crew else '' }}" {% if crew %}readonly{% endif %} placeholder="Station Code">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">To Station <span class="text-xs text-green-600 font-normal ml-1 border border-green-200 bg-green-50 px-1 rounded">Editable</span></label>
+              <input type="text" name="to_sttn" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 focus:bg-white uppercase transition-colors"
+                value="{{ crew.to_sttn if crew else '' }}" placeholder="Destination Code" oninput="this.value = this.value.toUpperCase()">
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. Train Details -->
+        <section class="border-t pt-8">
+          <h3 class="text-base font-semibold text-gray-900 flex items-center mb-4">
+            <span class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-0.5 rounded-full mr-2">3</span>
+            Train & Loco
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-6">
+            
+            <div class="col-span-1 md:col-span-2">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Loco Numbers (5 or 6 digits)</label>
+                <div id="loco-container" class="space-y-2">
+                    {% set locos = (crew.loco_no.split(',') if crew and crew.loco_no else ['']) %}
+                    {% for loco in locos %}
+                    <div class="flex items-center space-x-2 loco-row">
+                        <input type="text" name="loco_no[]" pattern="^\d{5,6}$" title="Must be exactly 5 or 6 digits" required
+                            class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                            value="{{ loco.strip() }}" placeholder="e.g. 41825">
+                        {% if loop.first %}
+                        <button type="button" onclick="addLocoRow()" class="px-3 py-2 bg-gray-100 text-gray-600 rounded-md border border-gray-300 hover:bg-gray-200 transition-colors">+</button>
+                        {% else %}
+                        <button type="button" onclick="this.parentElement.remove()" class="px-3 py-2 bg-red-50 text-red-600 rounded-md border border-red-200 hover:bg-red-100 transition-colors">X</button>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="loco_no" id="combined_locos">
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Train Number / Name</label>
+              <input type="text" name="train_no" required class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 uppercase"
+                value="{{ crew.train_no if crew and crew.train_no else '' }}" placeholder="e.g. 12801" oninput="this.value=this.value.toUpperCase()">
+            </div>
+            
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">CTO Date & Time</label>
+              <div class="flex space-x-2">
+                <input type="date" name="cto_date" id="cto_date" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                  value="{{ crew.cto_date_val if crew and crew.cto_date_val else '' }}">
+                <input type="time" name="cto_time" id="cto_time" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                  value="{{ crew.cto_time_val if crew and crew.cto_time_val else '' }}">
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Departure Date & Time</label>
+              <div class="flex space-x-2">
+                <input type="date" name="departure_date" id="departure_date" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                  value="{{ crew.departure_date_val if crew and crew.departure_date_val else '' }}">
+                <input type="time" name="departure_time" id="departure_time" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                  value="{{ crew.departure_time_val if crew and crew.departure_time_val else '' }}">
+              </div>
+            </div>
+
+            <div class="col-span-1 md:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-medium text-gray-700">BPC Number (5 digits)</label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="le_checkbox" class="sr-only peer" onchange="toggleBPC()">
+                        <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        <span class="ml-3 text-sm font-medium text-gray-700">Light Engine (LE)</span>
+                    </label>
+                </div>
+                <input type="text" id="bpc_input" name="bpc_no" pattern="^\d{5}$" title="BPC must be exactly 5 digits" maxlength="5" required
+                    class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                    value="{{ crew.bpc_no if crew and crew.bpc_no else '' }}"
+                    placeholder="Last 5 digits of BPC number" inputmode="numeric" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)">
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Location -->
+        <section class="border-t pt-8" id="locationSection">
+          <h3 class="text-base font-semibold text-gray-900 flex items-center mb-4">
+            <span class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-0.5 rounded-full mr-2">4</span>
+            CTO Location (Current Location) <span class="text-xs text-red-600 font-normal ml-2">*Required</span>
+          </h3>
+          
+          <div class="bg-blue-50 rounded-lg p-4 border border-blue-100" id="locationBox">
+            <div id="gpsLocationBox">
+                <div class="flex items-center text-blue-800 mb-2" id="locationStatus">
+                  <svg class="w-5 h-5 mr-2 pulse-icon text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  <span class="font-medium text-sm">Getting location...</span>
+                </div>
+                <p class="text-xs text-blue-600 mb-4" id="coordDisplay">Requesting GPS access</p>
+    
+                <div id="locationErrorBanner" class="hidden mb-4 p-3 bg-red-100 border border-red-300 rounded text-sm text-red-700">
+                    Location access is required. Please allow location and retry.
+                </div>
+                <button type="button" id="retryLocBtn" class="hidden mb-4 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700" onclick="fetchLocation()">Retry Location</button>
+    
+                <div id="nearestStations" style="display:none" class="space-y-2">
+                  <p class="text-sm font-medium text-gray-700">Select your nearest station:</p>
+                  <div id="stationCards" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+                </div>
+            </div>
+
+            <input type="hidden" name="current_location" id="current_location" value="{{ crew.current_location if crew and crew.current_location else '' }}">
+            <div id="selectedStation" style="display:none" class="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-md">
+              <div class="flex items-center text-green-700">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                <span class="text-sm font-medium" id="selectedStationText"></span>
+              </div>
+              <button type="button" class="text-sm text-green-600 underline hover:text-green-800" onclick="reshowStations()">Change</button>
+            </div>
+            
+            <!-- Readonly display for when Relief is checked -->
+            <div id="readonlyCtoLocation" style="display:none" class="bg-gray-100 border border-gray-300 p-3 rounded-md text-gray-600 font-medium mt-2">
+               <span id="readonlyCtoText" class="text-lg font-bold text-gray-800">{{ crew.current_location if crew and crew.current_location else 'Unknown' }}</span>
+               <p class="text-xs text-gray-500 font-normal mt-1">Previous location auto-populated. GPS will now auto-select your Relief Location.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. Relief -->
+        <section class="border-t pt-8">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-semibold text-gray-900 flex items-center">
+                    <span class="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-0.5 rounded-full mr-2">5</span>
+                    Relief Details
+                </h3>
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="hidden" name="is_relief" id="is_relief_hidden" value="0">
+                    <input type="checkbox" id="relief_toggle" class="sr-only peer" onchange="toggleRelief()">
+                    <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+            </div>
+
+            <div id="relief_section" class="hidden bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-amber-900 mb-1">Relief Station</label>
+                        <select name="relief_station" id="relief_station" class="block w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 sm:text-sm border p-2 bg-white text-gray-900 uppercase">
+                            <!-- Populated dynamically via JS -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-amber-900 mb-1">Relief Date & Time</label>
+                        <div class="flex space-x-2">
+                            <input type="date" name="relief_datetime" id="relief_date" class="block w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 sm:text-sm border p-2"
+                              value="{{ crew.relief_date_val if crew and crew.relief_date_val else '' }}">
+                            <input type="time" name="relief_time" id="relief_time" class="block w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 sm:text-sm border p-2"
+                              value="{{ crew.relief_time_val if crew and crew.relief_time_val else '' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charge Handover -->
+                <div class="mt-4 border-t border-amber-200 pt-4">
+                    <label class="block text-sm font-medium text-amber-900 mb-2">Charge Handover ID (Relieving Crew)</label>
+                    <input type="hidden" name="handover_crew_id" id="handover_crew_id">
+                    <div class="flex items-stretch gap-2">
+                        <select id="ho_lobby" class="block w-32 py-2 px-3 border border-amber-300 rounded-md bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+                            <option value="">Lobby</option>
+                            <option value="TPKR">TPKR</option>
+                            <option value="SRC">SRC</option>
+                            <option value="ADL">ADL</option>
+                            <option value="HDCB">HDCB</option>
+                            <option value="PKU">PKU</option>
+                            <option value="MCA">MCA</option>
+                            <option value="KGP">KGP</option>
+                            <option value="NMP">NMP</option>
+                            <option value="GTS">GTS</option>
+                            <option value="BLS">BLS</option>
+                        </select>
+                        <input type="text" id="ho_num" placeholder="0000" maxlength="4" inputmode="numeric" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)" class="flex-1 rounded-md border-amber-300 py-2 px-3 text-sm focus:ring-amber-500 font-mono tracking-widest">
+                        <button type="button" onclick="lookupHandoverCrew()" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 text-sm font-medium transition-colors">Lookup</button>
+                    </div>
+                    <p id="ho_status" class="mt-2 text-xs text-amber-700"></p>
+                </div>
+            </div>
+            </div>
+        </section>
+
+            <input type="hidden" name="current_location" id="current_location" value="">
+            <div id="selectedStation" style="display:none" class="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-md">
+              <div class="flex items-center text-green-700">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                <span class="text-sm font-medium" id="selectedStationText"></span>
+              </div>
+              <button type="button" class="text-sm text-green-600 underline hover:text-green-800" onclick="reshowStations()">Change</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Actions -->
+        <div class="border-t pt-6 flex items-center justify-between">
+          <a href="/" class="text-sm font-medium text-gray-600 hover:text-gray-900 bg-gray-100 px-4 py-2 rounded-lg transition-colors">Cancel</a>
+          <button type="submit" class="inline-flex justify-center items-center py-2 px-6 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+            Submit Report
+          </button>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script>
+    // --- Loco Logic ---
+    function addLocoRow() {
+        const container = document.getElementById('loco-container');
+        const row = document.createElement('div');
+        row.className = 'flex items-center space-x-2 loco-row';
+        row.innerHTML = `
+            <input type="text" pattern="^\\d{5,6}$" title="Must be exactly 5 or 6 digits" required
+                class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                placeholder="Loco Number">
+            <button type="button" onclick="this.parentElement.remove()" class="px-3 py-2 bg-red-50 text-red-600 rounded-md border border-red-200 hover:bg-red-100 transition-colors">X</button>
+        `;
+        container.appendChild(row);
+    }
+
+    // --- BPC Logic ---
+    function toggleBPC() {
+        const isLE = document.getElementById('le_checkbox').checked;
+        const bpcInput = document.getElementById('bpc_input');
+        if (isLE) {
+            bpcInput.value = 'LE';
+            bpcInput.readOnly = true;
+            bpcInput.className = "block w-full rounded-md border-gray-300 shadow-sm bg-gray-100 sm:text-sm border p-2 text-gray-500";
+        } else {
+            bpcInput.value = '';
+            bpcInput.readOnly = false;
+            bpcInput.className = "block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2";
+        }
+    }
+
+    // --- Geolocation Logic ---
+    let STATIONS = [];
+    
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function showNearestStations(lat, lon) {
+      const ranked = STATIONS.map(s => ({ ...s, dist: haversine(lat, lon, s.lat, s.lon) }))
+                              .sort((a, b) => a.dist - b.dist)
+                              .slice(0, 4);
+
+      const cards = document.getElementById('stationCards');
+      cards.innerHTML = '';
+      ranked.forEach(s => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors w-full bg-white text-left';
+        btn.innerHTML = `
+          <div><span class="font-bold text-gray-900">${s.code}</span> <span class="text-xs text-gray-500 ml-1 truncate max-w-[100px] inline-block align-bottom">${s.name}</span></div>
+          <span class="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-1 rounded">${(s.dist * 1000).toFixed(0)}m</span>
+        `;
+        btn.onclick = () => selectStation(s.code, s.name);
+        cards.appendChild(btn);
+      });
+      document.getElementById('nearestStations').style.display = 'block';
+
+      // Auto-select nearest station
+      if (ranked.length > 0) {
+          selectStation(ranked[0].code, ranked[0].name);
+      }
+    }
+
+    let gpsDetectedLocation = '';
+    
+    function selectStation(code, name) {
+      gpsDetectedLocation = code;
+      const isRelief = document.getElementById('relief_toggle').checked;
+      
+      if (!isRelief) {
+          document.getElementById('current_location').value = code;
+          document.getElementById('selectedStation').style.display = 'flex';
+      }
+      
+      document.getElementById('selectedStationText').textContent = `${code} — ${name}`;
+      document.getElementById('nearestStations').style.display = 'none';
+      
+      // Auto-set relief station
+      const rs = document.getElementById('relief_station');
+      if (rs) {
+          Array.from(rs.options).forEach(opt => {
+              if (opt.value === code) rs.value = code;
+          });
+      }
+    }
+
+    function reshowStations() {
+      document.getElementById('nearestStations').style.display = 'block';
+      document.getElementById('selectedStation').style.display = 'none';
+      document.getElementById('current_location').value = '';
+    }
+
+    function showLocError(msg) {
+        document.getElementById('locationStatus').innerHTML = '<span class="font-medium text-sm text-red-600">Location unavailable</span>';
+        document.getElementById('coordDisplay').textContent = '';
+        document.getElementById('locationErrorBanner').textContent = msg || 'Location access is required. Please allow location and retry.';
+        document.getElementById('locationErrorBanner').classList.remove('hidden');
+        document.getElementById('retryLocBtn').classList.remove('hidden');
+        document.getElementById('nearestStations').style.display = 'none';
+        document.getElementById('selectedStation').style.display = 'none';
+        document.getElementById('current_location').value = '';
+    }
+
+    function fetchLocation() {
+        document.getElementById('locationErrorBanner').classList.add('hidden');
+        document.getElementById('retryLocBtn').classList.add('hidden');
+        document.getElementById('locationStatus').innerHTML = '<svg class="w-5 h-5 mr-2 pulse-icon text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg><span class="font-medium text-sm">Getting location...</span>';
+        document.getElementById('coordDisplay').textContent = 'Requesting GPS access...';
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    const { latitude, longitude, accuracy } = pos.coords;
+                    document.getElementById('coordDisplay').textContent = `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`;
+                    document.getElementById('locationStatus').innerHTML = '<svg class="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span class="font-medium text-sm text-green-700">Location fixed</span>';
+                    showNearestStations(latitude, longitude);
+                },
+                err => {
+                    let errStr = '';
+                    if (err.code === 1) errStr = "Permission denied.";
+                    else if (err.code === 2) errStr = "Position unavailable.";
+                    else if (err.code === 3) errStr = "Timeout.";
+                    showLocError('Location access failed: ' + errStr + ' Please allow location in your browser and retry.');
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        } else {
+            showLocError('Geolocation is not supported by this browser.');
+        }
+    }
+
+    // Fetch stations and locate
+    fetch('/api/stations')
+        .then(r => r.json())
+        .then(data => {
+            STATIONS = data;
+            
+            // Populate relief station dropdown
+            const rs = document.getElementById('relief_station');
+            data.forEach(s => {
+                let opt = document.createElement('option');
+                opt.value = s.code;
+                opt.textContent = `${s.code} - ${s.name}`;
+                rs.appendChild(opt);
+            });
+
+            fetchLocation();
+        }).catch(err => {
+            console.error("Failed to load stations", err);
+            showLocError('Failed to load station list. Please check your connection.');
+        });
+
+    // Auto-populate Date and Time only if empty
+    const now = new Date();
+    const tzOffset = now.getTimezoneOffset() * 60000;
+    const localISOTime = (new Date(Date.now() - tzOffset)).toISOString().slice(0, -1);
+    
+    ['cto', 'departure', 'relief'].forEach(prefix => {
+        const d_el = document.getElementById(prefix + '_date');
+        const t_el = document.getElementById(prefix + '_time');
+        if (d_el && !d_el.value) d_el.value = localISOTime.split('T')[0];
+        if (t_el && !t_el.value) t_el.value = localISOTime.split('T')[1].substring(0, 5);
+    });
+
+    function toggleRelief() {
+        const isRelief = document.getElementById('relief_toggle').checked;
+        document.getElementById('is_relief_hidden').value = isRelief ? "1" : "0";
+        const section = document.getElementById('relief_section');
+        const trainInputs = [
+            document.querySelector('input[name="from_sttn"]'),
+            ...document.querySelectorAll('input[name="loco_no[]"]'),
+            document.querySelector('input[name="train_no"]'),
+            document.querySelector('input[name="bpc_no"]')
+        ];
+
+        const gpsLocBox = document.getElementById('gpsLocationBox');
+        const readonlyCto = document.getElementById('readonlyCtoLocation');
+        const selectedStationDiv = document.getElementById('selectedStation');
+
+        if (isRelief) {
+            section.classList.remove('hidden');
+            trainInputs.forEach(el => {
+                if(el) {
+                    el.required = false;
+                    el.readOnly = true;
+                    el.classList.add('bg-gray-200', 'text-gray-500');
+                }
+            });
+            // Lock CTO Location
+            if (gpsLocBox) gpsLocBox.style.display = 'none';
+            if (selectedStationDiv) selectedStationDiv.style.display = 'none';
+            if (readonlyCto) readonlyCto.style.display = 'block';
+            
+            // Restore previous location
+            document.getElementById('current_location').value = "{{ crew.current_location if crew and crew.current_location else '' }}";
+
+            // Auto populate relief time
+            const n = new Date();
+            const tz = n.getTimezoneOffset() * 60000;
+            const iso = (new Date(Date.now() - tz)).toISOString().slice(0, -1);
+            document.getElementById('relief_date').value = iso.split('T')[0];
+            document.getElementById('relief_time').value = iso.split('T')[1].substring(0, 5);
+        } else {
+            section.classList.add('hidden');
+            trainInputs.forEach(el => {
+                if(el) {
+                    el.required = (el.name !== 'from_sttn'); 
+                    el.readOnly = false;
+                    el.classList.remove('bg-gray-200', 'text-gray-500');
+                }
+            });
+            document.querySelector('input[name="from_sttn"]').required = false; 
+            document.querySelector('input[name="train_no"]').required = true;
+
+            // Unlock CTO Location
+            if (readonlyCto) readonlyCto.style.display = 'none';
+            
+            if (typeof gpsDetectedLocation !== 'undefined' && gpsDetectedLocation) {
+                document.getElementById('current_location').value = gpsDetectedLocation;
+                if (selectedStationDiv) selectedStationDiv.style.display = 'flex';
+                if (gpsLocBox) gpsLocBox.style.display = 'none';
+            } else {
+                if (gpsLocBox) gpsLocBox.style.display = 'block';
+            }
+        }
+    }
+
+    async function lookupHandoverCrew() {
+        const lobby = document.getElementById('ho_lobby').value;
+        const num = document.getElementById('ho_num').value;
+        const stat = document.getElementById('ho_status');
+        
+        if (!lobby || num.length !== 4) {
+            stat.textContent = "Enter a valid Lobby and 4-digit ID.";
+            stat.className = "mt-2 text-xs text-red-600";
+            return;
+        }
+        
+        const fullId = lobby + num;
+        document.getElementById('handover_crew_id').value = fullId;
+        stat.textContent = "Looking up crew...";
+        stat.className = "mt-2 text-xs text-amber-700";
+
+        try {
+            const res = await fetch('/api/crew_lookup/' + fullId);
+            const data = await res.json();
+            if (data.status === 'ok') {
+                stat.textContent = "✓ Linked to " + fullId;
+                stat.className = "mt-2 text-xs text-green-600 font-medium";
+            } else {
+                stat.textContent = "Crew not found or no active duties.";
+                stat.className = "mt-2 text-xs text-red-600";
+                document.getElementById('handover_crew_id').value = '';
+            }
+        } catch (err) {
+            stat.textContent = "Lookup failed.";
+            stat.className = "mt-2 text-xs text-red-600";
+        }
+    }
+
+    // Form Submission
+    document.getElementById('dutyForm').addEventListener('submit', function(e) {
+        // combine loco inputs (if not disabled)
+        const locoInputs = document.querySelectorAll('.loco-row input:not(:disabled)');
+        const vals = Array.from(locoInputs).map(inp => inp.value.trim()).filter(v => v);
+        document.getElementById('combined_locos').value = vals.join(',');
+        
+        // combine relief datetime
+        const rd = document.getElementById('relief_date').value;
+        const rt = document.getElementById('relief_time').value;
+        if (rd && rt) {
+            try {
+                // Ensure hidden input for relief datetime exists
+                let rdtInput = document.getElementById('relief_datetime_hidden');
+                if (!rdtInput) {
+                    rdtInput = document.createElement('input');
+                    rdtInput.type = 'hidden';
+                    rdtInput.name = 'relief_datetime';
+                    rdtInput.id = 'relief_datetime_hidden';
+                    this.appendChild(rdtInput);
+                }
+                const pdate = rd.split('-').reverse().join('-'); // basic transform to DD-MM-YYYY
+                rdtInput.value = `${pdate} ${rt}`;
+            } catch(ex) {
+                console.error(ex);
+            }
+        }
+
+        const loc = document.getElementById('current_location').value;
+        if (!loc) {
+            e.preventDefault();
+            // Show location section if hidden
+            document.getElementById('locationSection').style.display = 'block';
+            
+            // Highlight location box
+            const box = document.getElementById('locationBox');
+            box.classList.remove('border-blue-100', 'bg-blue-50');
+            box.classList.add('border-red-400', 'bg-red-50');
+            
+            document.getElementById('locationSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            const errBanner = document.getElementById('locationErrorBanner');
+            if (errBanner.classList.contains('hidden')) {
+                errBanner.textContent = 'Please select a location before submitting.';
+                errBanner.classList.remove('hidden');
+            }
+        }
+    });
+  </script>
+</body>
+</html>

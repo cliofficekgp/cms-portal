@@ -1,0 +1,28 @@
+venv/
+data/
+chromedriver-win64/
+*.log
+*.sqlite3
+*.db
+__pycache__/
+*.pyc
+*.pyo
+.env
+.DS_Store
+Thumbs.db
+
+# Scratch / test files
+check_form.py
+scratch_*.html
+booking_on_ta_report.html
+captured_image.*
+preprocessed_image.png
+skip_failure.png
+pixelcut-export.png
+last_run.txt
+otp.txt
+cookies.json
+db.sqlite
+
+# Credentials
+scraper/algebraic-cycle-432817-r8-ae9fa17cac37.json

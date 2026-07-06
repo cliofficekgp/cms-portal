@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Admin Account — CMS Crew Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass { background: rgba(255,255,255,0.08); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.15); }
+        .input-field { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.2); color: white; transition: all 0.3s ease; }
+        .input-field::placeholder { color: rgba(255,255,255,0.4); }
+        .input-field:focus { outline: none; border-color: #818cf8; background: rgba(255,255,255,0.12); box-shadow: 0 0 0 3px rgba(129,140,248,0.25); }
+        .btn-primary { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); transition: all 0.3s ease; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(99,102,241,0.5); }
+        select.input-field option { background: #302b63; color: white; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center py-10" style="background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);">
+    <div class="w-full max-w-md px-6">
+        <div class="glass rounded-2xl p-8 shadow-2xl">
+            <div class="text-center mb-7">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4" style="background: linear-gradient(135deg, #059669, #10b981)">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-white">Create Admin Account</h1>
+                <p class="text-sm text-green-300 mt-1">One-time passcode required</p>
+            </div>
+
+            {% if error %}
+            <div class="mb-5 px-4 py-3 rounded-lg bg-red-900/40 border border-red-500/40 text-red-300 text-sm">{{ error }}</div>
+            {% endif %}
+
+            <form method="POST" action="/admin/signup" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-green-200 mb-1">Signup Passcode</label>
+                    <input type="text" name="passcode" id="passcode" required placeholder="Enter one-time passcode"
+                           class="input-field w-full px-4 py-3 rounded-xl text-sm font-mono tracking-widest uppercase">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-green-200 mb-1">Username</label>
+                    <input type="text" name="username" id="signup-username" required placeholder="Choose a username"
+                           class="input-field w-full px-4 py-3 rounded-xl text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-green-200 mb-1">Password</label>
+                    <input type="password" name="password" id="signup-password" required minlength="6" placeholder="Min. 6 characters"
+                           class="input-field w-full px-4 py-3 rounded-xl text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-green-200 mb-1">Secret Question</label>
+                    <select name="secret_question" id="secret-question" class="input-field w-full px-4 py-3 rounded-xl text-sm">
+                        <option value="What was the name of your first pet?">What was the name of your first pet?</option>
+                        <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
+                        <option value="What city were you born in?">What city were you born in?</option>
+                        <option value="What was the name of your primary school?">What was the name of your primary school?</option>
+                        <option value="What is your favourite movie?">What is your favourite movie?</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-green-200 mb-1">Secret Answer</label>
+                    <input type="text" name="secret_answer" id="secret-answer" required placeholder="Your answer (case-insensitive)"
+                           class="input-field w-full px-4 py-3 rounded-xl text-sm">
+                </div>
+                <button type="submit" id="signup-btn" class="btn-primary w-full py-3 px-6 rounded-xl font-semibold text-white text-sm mt-2">
+                    Create Account →
+                </button>
+            </form>
+
+            <div class="mt-5 text-center">
+                <a href="/admin/login" class="text-sm text-indigo-300 hover:text-indigo-100 transition-colors">← Back to Login</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
