@@ -2,7 +2,7 @@ flask==3.0.3
 werkzeug==3.0.3
 requests==2.31.0
 beautifulsoup4==4.12.3
-selenium>=4.23
+selenium==4.21.0
 pillow==10.3.0
 gunicorn==22.0.0
 google-cloud-vision==3.7.2
