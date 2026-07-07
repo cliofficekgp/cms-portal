@@ -1,5 +1,10 @@
 FROM python:3.11-slim-bookworm
 
+# Overwrite sources to pin to a working snapshot from July 1, 2026
+RUN echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260701T000000Z/ bookworm main" > /etc/apt/sources.list && \
+    echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260701T000000Z/ bookworm-security main" >> /etc/apt/sources.list
+
+# Proceed with your standard installs (it will fetch the older working chromium version)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     chromium \
