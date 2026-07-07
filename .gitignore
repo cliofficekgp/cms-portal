@@ -26,3 +26,5 @@ db.sqlite
 
 # Credentials
 scraper/algebraic-cycle-432817-r8-ae9fa17cac37.json
+
+gcp_creds_b64.txt

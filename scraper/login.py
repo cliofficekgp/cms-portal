@@ -218,12 +218,13 @@ def main_loop():
                 options.binary_location = chrome_bin
 
             # Detect chromedriver path
-            chromedriver_path = os.environ.get('CHROMEDRIVER_PATH', '')
-            if chromedriver_path:
-                from selenium.webdriver.chrome.service import Service
-                driver = webdriver.Chrome(service=Service(chromedriver_path), options=options)
-            else:
-                driver = webdriver.Chrome(options=options)
+            # chromedriver_path = os.environ.get('CHROMEDRIVER_PATH', '')
+            # if chromedriver_path:
+            #     from selenium.webdriver.chrome.service import Service
+            #     driver = webdriver.Chrome(service=Service(chromedriver_path), options=options)
+            # else:
+            #     driver = webdriver.Chrome(options=options)
+            driver = webdriver.Chrome(options=options)
 
             driver.get('https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=login&isResponsive=Y')
             time.sleep(3)
