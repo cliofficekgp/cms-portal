@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     gosu \
     tini \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CHROME_BIN=/usr/bin/chromium
