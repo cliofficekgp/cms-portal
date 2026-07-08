@@ -172,6 +172,10 @@ def main_loop():
             # 1. Try saved cookies
             cookie_valid = False
             session = requests.Session()
+            session.proxies = {
+                'http': 'socks5h://127.0.0.1:1080',
+                'https': 'socks5h://127.0.0.1:1080',
+            }
             if os.path.exists(COOKIES_FILE):
                 with open(COOKIES_FILE, 'r') as cf:
                     saved_cookies = json.load(cf)
@@ -201,6 +205,7 @@ def main_loop():
             options.add_argument("--no-first-run")
             options.add_argument("--safebrowsing-disable-auto-update")
             options.add_argument("--js-flags=--max-old-space-size=256")
+            options.add_argument('--proxy-server=socks5://127.0.0.1:1080')
 
             # Detect Chromium binary path (Linux vs Windows)
             chrome_bin = os.environ.get('CHROME_BIN', '')
@@ -383,6 +388,10 @@ def main_loop():
             
             # Sync
             session = requests.Session()
+            session.proxies = {
+                'http': 'socks5h://127.0.0.1:1080',
+                'https': 'socks5h://127.0.0.1:1080',
+            }
             for cookie in new_cookies:
                 session.cookies.set(cookie['name'], cookie['value'])
             

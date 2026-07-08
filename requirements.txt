@@ -6,3 +6,4 @@ selenium==4.21.0
 pillow==10.3.0
 gunicorn==22.0.0
 google-cloud-vision==3.7.2
+pysocks==1.7.1
