@@ -410,9 +410,6 @@ def main_loop():
                             if len(result) == 5: break
                 result = result.lower()
             
-            # Fetch CMS Credentials from DB
-            cms_user = 'KGPCLIHQ'
-            cms_pass = 'Cms@852'
             try:
                 import sqlite3
                 conn = sqlite3.connect(os.path.join(DATA_DIR, 'crew.db'))
