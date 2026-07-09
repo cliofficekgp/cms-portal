@@ -200,6 +200,21 @@ def init_db():
     ''')
 
     cur.execute('''
+        CREATE TABLE IF NOT EXISTS cms_settings (
+            id            INTEGER PRIMARY KEY,
+            cms_username  TEXT,
+            cms_password  TEXT
+        )
+    ''')
+
+    row_count = cur.execute('SELECT COUNT(*) FROM cms_settings').fetchone()[0]
+    if row_count == 0:
+        cur.execute(
+            'INSERT INTO cms_settings (id, cms_username, cms_password) VALUES (1, ?, ?)',
+            ('KGPCLIHQ', 'Cms@852')
+        )
+
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,

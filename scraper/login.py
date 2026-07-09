@@ -1,4 +1,4 @@
-import os, time, datetime, base64, io, json, traceback, zoneinfo, socket
+import os, time, datetime, base64, io, json, traceback, zoneinfo, socket, random
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -9,6 +9,26 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
 from google.cloud import vision
+
+# -----------------------------------------------------------------------------
+# Human-like timing helpers
+# -----------------------------------------------------------------------------
+
+def human_delay(min_s, max_s):
+    """Sleep a random amount between min_s and max_s seconds."""
+    time.sleep(random.uniform(min_s, max_s))
+
+def human_type(element, text, min_delay=0.06, max_delay=0.18):
+    """Type text character-by-character with small random delays,
+    like a real person typing rather than Selenium's instant send_keys."""
+    for ch in text:
+        element.send_keys(ch)
+        time.sleep(random.uniform(min_delay, max_delay))
+
+def random_cycle_sleep_seconds(min_minutes=25, max_minutes=35):
+    """Random sleep between min_minutes and max_minutes, in seconds."""
+    return random.uniform(min_minutes * 60, max_minutes * 60)
+
 
 # Setup Paths & APIs
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -169,6 +189,84 @@ def sync_signon_reports(session_obj):
         
     return False
 
+def sync_ta_reports(session_obj):
+    send_state_to_admin('running', 'Fetching TA Crew Report...')
+    
+    now = datetime.datetime.now(IST)
+    end_date_str = now.strftime('%d-%m-%Y %H:%M')
+    start_date_str = (now - datetime.timedelta(days=1)).strftime('%d-%m-%Y %H:%M')
+    
+    xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?><CMSPublishXML baseLanguage="string" transLanguage="string"><CMSREPORT action="REP" relationship="string" transLanguage="string"><zone>SER</zone><division>KGP</division><lobby>KGP</lobby><currentReportName><![CDATA[Booking On TA]]></currentReportName><desig1>false</desig1><desig2>false</desig2><desig3>LPG</desig3><desig4>false</desig4><desig5>false</desig5><desig6>false</desig6><desig7>false</desig7><desig8>false</desig8><desig9>false</desig9><desig10>false</desig10><desig11>false</desig11><desig12>false</desig12><abnormality1>COMMERCIAL</abnormality1><abnormality2>false</abnormality2><abnormality3>false</abnormality3><abnormality4>false</abnormality4><abnormality5>false</abnormality5><abnormality6>false</abnormality6><abnormality7>false</abnormality7><abnormality8>false</abnormality8><abnormality9>false</abnormality9><abnormality10>false</abnormality10><abnormality11>false</abnormality11><abnormality12>false</abnormality12><abnormality13>false</abnormality13><startingDate>{start_date_str}</startingDate><endDate>{end_date_str}</endDate><monthYearDateFormat></monthYearDateFormat><msgSrc>CS</msgSrc><traction>ALL</traction><cadre>E','M','B</cadre><fghtCochSht>FghtCoch</fghtCochSht><designation>PILOT</designation><active>Active</active><rlevel>DIVISION</rlevel><durationtype>FORTNIGHT</durationtype><combALP>COMB</combALP><slotData>not Slot Data</slotData><desigSelect>OFFICIATING</desigSelect><crewAvailableCheckList>CrewAvailableFIFO</crewAvailableCheckList><contValue>Continuous</contValue><mandatoryRequirementDueFilter>Reft</mandatoryRequirementDueFilter><signOnOFFVal>SignOnVal</signOnOFFVal><locoTraction>ALL</locoTraction><cont_NoncontValue>ContinuousHQ</cont_NoncontValue><contValueOption>SignOnOff</contValueOption><spare>spare</spare><crewHqSignOffSttn>asPerCrewHq</crewHqSignOffSttn><crewBAStatus>SIGNON</crewBAStatus><crewhq>HQ crew at HQ</crewhq><crewIDBaseID>CrewID</crewIDBaseID><crewDesgLevel>Goods</crewDesgLevel><currentMidnignt>CURRENT</currentMidnignt><abnormalityStatus>PN</abnormalityStatus><cadreFilter>notCadre</cadreFilter><year1></year1><crewBookingWrWorWise>CallBookLobbyWise</crewBookingWrWorWise><month1></month1><slotFilter>Previous</slotFilter><preodicCoursesVal>DONE</preodicCoursesVal><detailLevel>Detail</detailLevel><locoGroupVal>ELEC-CONV</locoGroupVal><time>4</time><dutyType>ALL</dutyType><locoTypeWiseVal>Group</locoTypeWiseVal><reportGroupVal>Lobby</reportGroupVal><dfccRadio>ALL</dfccRadio><abnormalityNil>NOT_NIL</abnormalityNil><bmbsRadio>ALL</bmbsRadio><prRportType>realTime</prRportType><serviceTypeInput>FREIGHT</serviceTypeInput><quizResultTypeVal>CategoryWise</quizResultTypeVal><fromSttn>null</fromSttn><toSttn>null</toSttn><slotValueCombo>Slot</slotValueCombo><locoNosearch></locoNosearch><monthCombo>Previous</monthCombo><monthComboValueText>Previous</monthComboValueText><indexValue>0</indexValue><slotValueText>Slot</slotValueText><route>- - -Route- - -</route><auCode>- - Select - -</auCode><weekDates>- - Select - -</weekDates><routename>- - Route- - -</routename><fromSttnNameRoute></fromSttnNameRoute><toSttnNameRoute></toSttnNameRoute><trainingValue>- - Select - -</trainingValue><trackCoverage>ALL</trackCoverage></CMSREPORT></CMSPublishXML>"""
+    
+    url = 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/crew/BookingOnTACrew.do?hmode=BookingOnTACrew'
+    headers = {
+        'Accept': 'text/html, */*; q=0.01',
+        'Origin': 'https://cms.indianrail.gov.in',
+        'Referer': 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=skipMapHrmsId&isResponsive=Y',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+    }
+    
+    data = {'XML': xml_payload, 'lobby': 'KGP', 'lobbyList': 'SER-KGP-KGP'}
+    try:
+        resp = session_obj.post(url, headers=headers, data=data, timeout=30)
+        if resp.status_code == 200:
+            resp_text_lower = resp.text.lower()
+            # NEW: Detect a stale/expired session the same way sync_signon_reports does.
+            # Without this, an expired-cookie response (login page / session-expire page)
+            # would silently fail the `table` lookup below and just return False,
+            # making it look like "no TA data" instead of "session invalid".
+            if "session expire page" in resp_text_lower or "loginform" in resp_text_lower or "jcaptcha" in resp_text_lower:
+                print("TA Sync: session expired/invalid (login page returned)")
+                return False
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            table = soup.find('table', id='BookingOnTATable')
+            if not table:
+                print("TA Sync: 'BookingOnTATable' not found in response")
+                return False
+            tbody = table.find('tbody')
+            if not tbody:
+                print("TA Sync: table found but no <tbody>")
+                return False
+            
+            ta_records = []
+            for row in tbody.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) < 25: continue
+                
+                # In the provided HTML structure:
+                # [5] ORDERING TIME
+                # [15] CREW ID
+                # [24] MOBILE NO
+                crew_id = cols[15].text.strip()
+                if not crew_id: continue
+                ordering_time = cols[5].text.strip()
+                mobile_no = cols[24].text.strip()
+                
+                ta_records.append({
+                    'crew_id': crew_id,
+                    'ordering_time': ordering_time,
+                    'mobile_number': mobile_no
+                })
+            
+            if ta_records:
+                send_state_to_admin('running', 'Syncing TA data to backend DB...')
+                sync_resp = requests.post(f"{FLASK_API_URL}/sync_ta", json=ta_records, headers={'X-API-Secret': API_SECRET})
+                if sync_resp.status_code == 200:
+                    print(f"Successfully synced TA data for {len(ta_records)} crews")
+                    return True
+                else:
+                    # NEW: log non-200 responses instead of silently falling through to `return False`
+                    print(f"TA Sync API returned {sync_resp.status_code}: {sync_resp.text[:300]}")
+            else:
+                # NEW: distinguish "table found but genuinely zero rows" from other failure paths
+                print("TA Sync: table found but produced 0 records (0 rows matched column-count filter, or all crew_id blank)")
+    except Exception as e:
+        print(f"TA Sync failed: {e}")
+        
+    return False
+
 # -----------------------------------------------------------------------------
 # Main Loop
 # -----------------------------------------------------------------------------
@@ -194,10 +292,30 @@ def main_loop():
                 for cookie in saved_cookies:
                     session.cookies.set(cookie['name'], cookie['value'])
                 cookie_valid = sync_signon_reports(session)
+
+                # ---------------------------------------------------------------
+                # FIX: sync_ta_reports() used to be called ONLY after a fresh
+                # Selenium login (far below, in the login-flow branch). As long
+                # as saved cookies stayed valid, the code always took this early
+                # "cookie_valid" branch and looped back via `continue` WITHOUT
+                # ever calling sync_ta_reports(). Since valid-cookie reuse is the
+                # common case (that's the entire point of caching cookies), TA
+                # sync was effectively dead code in practice -- confirmed by prod
+                # logs showing /api/sync firing but /api/sync_ta never firing.
+                #
+                # Now TA sync runs on every cycle where the session is valid,
+                # not just immediately after a fresh login.
+                # ---------------------------------------------------------------
+                if cookie_valid:
+                    ta_ok = sync_ta_reports(session)
+                    if not ta_ok:
+                        print("[main_loop] TA sync did not succeed this cycle (see sync_ta_reports logs above).")
             
             if cookie_valid:
-                send_state_to_admin('sleeping', 'Sync successful. Sleeping for 30 minutes...')
-                time.sleep(1800) # Sleep 30 mins after successful sync
+                sleep_seconds = random_cycle_sleep_seconds(25, 35)
+                sleep_minutes = sleep_seconds / 60
+                send_state_to_admin('sleeping', f'Sync successful. Sleeping for {sleep_minutes:.1f} minutes...')
+                time.sleep(sleep_seconds)
                 continue
                 
             # 2. Login Flow (Headless)
@@ -244,19 +362,21 @@ def main_loop():
                 driver = webdriver.Chrome(options=options)
 
             driver.get('https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=login&isResponsive=Y')
-            time.sleep(3)
+            human_delay(2.5, 5.0)  # time for the page to "be looked at" before doing anything
             
             # Handle Session Expire
             if "LOCAL COMPUTER WAS NOT USED" in driver.page_source or "Session Expire Page" in driver.title:
                 try:
+                    human_delay(0.8, 2.0)  # brief pause before reacting, like a person noticing the page
                     driver.execute_script("if (typeof load === 'function') { load(); } else { document.reportLoginForm.submit(); }")
-                    time.sleep(3)
+                    human_delay(2.5, 4.5)
                     handle_alert(driver)
                 except Exception:
                     pass
             
             # Solve Captcha
             try:
+                human_delay(0.5, 1.5)  # brief pause before locating the captcha image
                 img_el = driver.find_element(By.ID, "capt")
                 src = img_el.get_attribute('src')
                 b64_img = src.split(',')[1]
@@ -307,9 +427,22 @@ def main_loop():
 
             # Login
             try:
-                driver.find_element(By.ID, "User-Id").send_keys(cms_user)
-                driver.find_element(By.ID, "user-Password").send_keys(cms_pass)
-                driver.find_element(By.ID, "jcaptcha").send_keys(result)
+                user_field = driver.find_element(By.ID, "User-Id")
+                human_delay(0.4, 1.1)  # pause before clicking into the field, like locating it visually
+                user_field.click()
+                human_type(user_field, cms_user)
+
+                human_delay(0.3, 0.9)  # pause moving to next field
+                pass_field = driver.find_element(By.ID, "user-Password")
+                pass_field.click()
+                human_type(pass_field, cms_pass)
+
+                human_delay(0.4, 1.0)  # pause before reading/typing captcha, like a person glancing at the image
+                captcha_field = driver.find_element(By.ID, "jcaptcha")
+                captcha_field.click()
+                human_type(captcha_field, result)
+
+                human_delay(0.5, 1.3)  # brief pause before hitting submit
                 login_form = driver.find_element(By.ID, "loginForm")
                 submit_buttons = login_form.find_elements(By.XPATH, ".//input[@type='submit' or @type='button']")
                 if submit_buttons: submit_buttons[0].click()
@@ -318,7 +451,7 @@ def main_loop():
                 driver.quit()
                 continue
                 
-            time.sleep(3)
+            human_delay(2.5, 4.5)
             handle_alert(driver)
             
             # Check Result
@@ -367,13 +500,16 @@ def main_loop():
                 for inp in otp_inputs:
                     inp.send_keys(Keys.BACKSPACE)
                     inp.clear()
+                human_delay(0.5, 1.2)  # brief pause before keying in the OTP digits
                 for i, digit in enumerate(otp_val):
                     if i < len(otp_inputs):
                         otp_inputs[i].send_keys(digit)
-                        
+                        human_delay(0.15, 0.45)  # gap between each OTP digit, like typing one box at a time
+
+                human_delay(0.4, 1.0)  # pause before clicking verify
                 verify_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Verify') or contains(@onclick, 'verifyOTP')]")
                 verify_btn.click()
-                time.sleep(3)
+                human_delay(2.5, 4.5)
                 handle_alert(driver)
                 
                 source = driver.page_source
@@ -389,8 +525,9 @@ def main_loop():
                 skip_button = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//input[@value='SKIP' or @value='Skip'] | //input[contains(@onclick, 'SKIP')] | //input[@name='hmode' and @value='SKIP']"))
                 )
+                human_delay(0.6, 1.6)  # pause before clicking, as if reading the page first
                 driver.execute_script("arguments[0].click();", skip_button)
-                time.sleep(3)
+                human_delay(2.5, 4.0)
             except:
                 pass
 
@@ -413,9 +550,11 @@ def main_loop():
             ta_success = sync_ta_reports(session)
             
             if signon_success or ta_success:
-                send_state_to_admin('sleeping', 'Sync successful. Sleeping for 30 minutes...')
+                sleep_seconds = random_cycle_sleep_seconds(25, 35)
+                sleep_minutes = sleep_seconds / 60
+                send_state_to_admin('sleeping', f'Sync successful. Sleeping for {sleep_minutes:.1f} minutes...')
                 driver.quit()
-                time.sleep(1800)
+                time.sleep(sleep_seconds)
             else:
                 driver.quit()
 
@@ -425,65 +564,6 @@ def main_loop():
             try: driver.quit()
             except: pass
             time.sleep(60)
-
-def sync_ta_reports(session_obj):
-    send_state_to_admin('running', 'Fetching TA Crew Report...')
-    
-    now = datetime.datetime.now(IST)
-    end_date_str = now.strftime('%d-%m-%Y %H:%M')
-    start_date_str = (now - datetime.timedelta(days=1)).strftime('%d-%m-%Y %H:%M')
-    
-    xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?><CMSPublishXML baseLanguage="string" transLanguage="string"><CMSREPORT action="REP" relationship="string" transLanguage="string"><zone>SER</zone><division>KGP</division><lobby>KGP</lobby><currentReportName><![CDATA[Booking On TA]]></currentReportName><desig1>false</desig1><desig2>false</desig2><desig3>LPG</desig3><desig4>false</desig4><desig5>false</desig5><desig6>false</desig6><desig7>false</desig7><desig8>false</desig8><desig9>false</desig9><desig10>false</desig10><desig11>false</desig11><desig12>false</desig12><abnormality1>COMMERCIAL</abnormality1><abnormality2>false</abnormality2><abnormality3>false</abnormality3><abnormality4>false</abnormality4><abnormality5>false</abnormality5><abnormality6>false</abnormality6><abnormality7>false</abnormality7><abnormality8>false</abnormality8><abnormality9>false</abnormality9><abnormality10>false</abnormality10><abnormality11>false</abnormality11><abnormality12>false</abnormality12><abnormality13>false</abnormality13><startingDate>{start_date_str}</startingDate><endDate>{end_date_str}</endDate><monthYearDateFormat></monthYearDateFormat><msgSrc>CS</msgSrc><traction>ALL</traction><cadre>E','M','B</cadre><fghtCochSht>FghtCoch</fghtCochSht><designation>PILOT</designation><active>Active</active><rlevel>DIVISION</rlevel><durationtype>FORTNIGHT</durationtype><combALP>COMB</combALP><slotData>not Slot Data</slotData><desigSelect>OFFICIATING</desigSelect><crewAvailableCheckList>CrewAvailableFIFO</crewAvailableCheckList><contValue>Continuous</contValue><mandatoryRequirementDueFilter>Reft</mandatoryRequirementDueFilter><signOnOFFVal>SignOnVal</signOnOFFVal><locoTraction>ALL</locoTraction><cont_NoncontValue>ContinuousHQ</cont_NoncontValue><contValueOption>SignOnOff</contValueOption><spare>spare</spare><crewHqSignOffSttn>asPerCrewHq</crewHqSignOffSttn><crewBAStatus>SIGNON</crewBAStatus><crewhq>HQ crew at HQ</crewhq><crewIDBaseID>CrewID</crewIDBaseID><crewDesgLevel>Goods</crewDesgLevel><currentMidnignt>CURRENT</currentMidnignt><abnormalityStatus>PN</abnormalityStatus><cadreFilter>notCadre</cadreFilter><year1></year1><crewBookingWrWorWise>CallBookLobbyWise</crewBookingWrWorWise><month1></month1><slotFilter>Previous</slotFilter><preodicCoursesVal>DONE</preodicCoursesVal><detailLevel>Detail</detailLevel><locoGroupVal>ELEC-CONV</locoGroupVal><time>4</time><dutyType>ALL</dutyType><locoTypeWiseVal>Group</locoTypeWiseVal><reportGroupVal>Lobby</reportGroupVal><dfccRadio>ALL</dfccRadio><abnormalityNil>NOT_NIL</abnormalityNil><bmbsRadio>ALL</bmbsRadio><prRportType>realTime</prRportType><serviceTypeInput>FREIGHT</serviceTypeInput><quizResultTypeVal>CategoryWise</quizResultTypeVal><fromSttn>null</fromSttn><toSttn>null</toSttn><slotValueCombo>Slot</slotValueCombo><locoNosearch></locoNosearch><monthCombo>Previous</monthCombo><monthComboValueText>Previous</monthComboValueText><indexValue>0</indexValue><slotValueText>Slot</slotValueText><route>- - -Route- - -</route><auCode>- - Select - -</auCode><weekDates>- - Select - -</weekDates><routename>- - Route- - -</routename><fromSttnNameRoute></fromSttnNameRoute><toSttnNameRoute></toSttnNameRoute><trainingValue>- - Select - -</trainingValue><trackCoverage>ALL</trackCoverage></CMSREPORT></CMSPublishXML>"""
-    
-    url = 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/crew/BookingOnTACrew.do?hmode=BookingOnTACrew'
-    headers = {
-        'Accept': 'text/html, */*; q=0.01',
-        'Origin': 'https://cms.indianrail.gov.in',
-        'Referer': 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=skipMapHrmsId&isResponsive=Y',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-    }
-    
-    data = {'XML': xml_payload, 'lobby': 'KGP', 'lobbyList': 'SER-KGP-KGP'}
-    try:
-        resp = session_obj.post(url, headers=headers, data=data, timeout=30)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            table = soup.find('table', id='BookingOnTATable')
-            if not table: return False
-            tbody = table.find('tbody')
-            if not tbody: return False
-            
-            ta_records = []
-            for row in tbody.find_all('tr'):
-                cols = row.find_all('td')
-                if len(cols) < 25: continue
-                
-                # In the provided HTML structure:
-                # [5] ORDERING TIME
-                # [15] CREW ID
-                # [24] MOBILE NO
-                crew_id = cols[15].text.strip()
-                if not crew_id: continue
-                ordering_time = cols[5].text.strip()
-                mobile_no = cols[24].text.strip()
-                
-                ta_records.append({
-                    'crew_id': crew_id,
-                    'ordering_time': ordering_time,
-                    'mobile_number': mobile_no
-                })
-            
-            if ta_records:
-                send_state_to_admin('running', 'Syncing TA data to backend DB...')
-                sync_resp = requests.post(f"{FLASK_API_URL}/sync_ta", json=ta_records, headers={'X-API-Secret': API_SECRET})
-                if sync_resp.status_code == 200:
-                    print(f"Successfully synced TA data for {len(ta_records)} crews")
-                    return True
-    except Exception as e:
-        print(f"TA Sync failed: {e}")
-        
-    return False
 
 if __name__ == '__main__':
     main_loop()
