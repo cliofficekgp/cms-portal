@@ -71,7 +71,9 @@
                         <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="10">Location <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
                         <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="11">CTO Time <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
                         <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="12">Relief <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="13">Found in NS? <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="13">Ord Time <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="14">Mobile No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
+                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="15">Found in NS? <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
 
                     </tr>
                 </thead>
@@ -99,6 +101,8 @@
                                 -
                             {% endif %}
                         </td>
+                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.ordering_time if crew.ordering_time else '-' }}</td>
+                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.mobile_number if crew.mobile_number else '-' }}</td>
                         <td class="px-2 py-1.5 text-center" data-val="{{ '1' if crew.found_in_ns == 'yes' else '0' }}">
                             <input type="checkbox" class="ns-checkbox w-3.5 h-3.5 text-indigo-600 bg-gray-100 border-gray-400 rounded focus:ring-indigo-500 cursor-pointer" 
                                 data-crew="{{ crew.crew_id }}" data-is-relief="{{ crew.is_relief }}" {% if crew.found_in_ns == 'yes' %}checked{% endif %}>

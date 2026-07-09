@@ -1,4 +1,4 @@
-import os, time, datetime, base64, io, json, traceback
+import os, time, datetime, base64, io, json, traceback, zoneinfo, socket
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -27,6 +27,17 @@ LAST_RUN_FILE = os.path.join(DATA_DIR, 'last_run.txt')
 
 FLASK_API_URL = f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api"
 API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
+
+IST = zoneinfo.ZoneInfo("Asia/Kolkata")
+
+def is_proxy_available(host="127.0.0.1", port=1080):
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+USE_PROXY = is_proxy_available()
 
 def send_state_to_admin(status, message, action_required=False, action_type='', image_base64=''):
     try:
@@ -150,7 +161,7 @@ def sync_signon_reports(session_obj):
         resp = requests.post(f"{FLASK_API_URL}/sync", json=current_crew_map, headers={'X-API-Secret': API_SECRET})
         if resp.status_code == 200:
             print("Successfully synced with Flask API")
-            now = datetime.datetime.now()
+            now = datetime.datetime.now(IST)
             with open(LAST_RUN_FILE, 'w') as lf: lf.write(now.strftime('%d-%m-%Y %H:%M'))
             return True
     except Exception as e:
@@ -172,10 +183,11 @@ def main_loop():
             # 1. Try saved cookies
             cookie_valid = False
             session = requests.Session()
-            session.proxies = {
-                'http': 'socks5h://127.0.0.1:1080',
-                'https': 'socks5h://127.0.0.1:1080',
-            }
+            if USE_PROXY:
+                session.proxies = {
+                    'http': 'socks5h://127.0.0.1:1080',
+                    'https': 'socks5h://127.0.0.1:1080',
+                }
             if os.path.exists(COOKIES_FILE):
                 with open(COOKIES_FILE, 'r') as cf:
                     saved_cookies = json.load(cf)
@@ -205,7 +217,8 @@ def main_loop():
             options.add_argument("--no-first-run")
             options.add_argument("--safebrowsing-disable-auto-update")
             options.add_argument("--js-flags=--max-old-space-size=256")
-            options.add_argument('--proxy-server=socks5://127.0.0.1:1080')
+            if USE_PROXY:
+                options.add_argument('--proxy-server=socks5://127.0.0.1:1080')
 
             # Detect Chromium binary path (Linux vs Windows)
             chrome_bin = os.environ.get('CHROME_BIN', '')
@@ -388,14 +401,18 @@ def main_loop():
             
             # Sync
             session = requests.Session()
-            session.proxies = {
-                'http': 'socks5h://127.0.0.1:1080',
-                'https': 'socks5h://127.0.0.1:1080',
-            }
+            if USE_PROXY:
+                session.proxies = {
+                    'http': 'socks5h://127.0.0.1:1080',
+                    'https': 'socks5h://127.0.0.1:1080',
+                }
             for cookie in new_cookies:
                 session.cookies.set(cookie['name'], cookie['value'])
             
-            if sync_signon_reports(session):
+            signon_success = sync_signon_reports(session)
+            ta_success = sync_ta_reports(session)
+            
+            if signon_success or ta_success:
                 send_state_to_admin('sleeping', 'Sync successful. Sleeping for 30 minutes...')
                 driver.quit()
                 time.sleep(1800)
@@ -408,6 +425,65 @@ def main_loop():
             try: driver.quit()
             except: pass
             time.sleep(60)
+
+def sync_ta_reports(session_obj):
+    send_state_to_admin('running', 'Fetching TA Crew Report...')
+    
+    now = datetime.datetime.now(IST)
+    end_date_str = now.strftime('%d-%m-%Y %H:%M')
+    start_date_str = (now - datetime.timedelta(days=1)).strftime('%d-%m-%Y %H:%M')
+    
+    xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?><CMSPublishXML baseLanguage="string" transLanguage="string"><CMSREPORT action="REP" relationship="string" transLanguage="string"><zone>SER</zone><division>KGP</division><lobby>KGP</lobby><currentReportName><![CDATA[Booking On TA]]></currentReportName><desig1>false</desig1><desig2>false</desig2><desig3>LPG</desig3><desig4>false</desig4><desig5>false</desig5><desig6>false</desig6><desig7>false</desig7><desig8>false</desig8><desig9>false</desig9><desig10>false</desig10><desig11>false</desig11><desig12>false</desig12><abnormality1>COMMERCIAL</abnormality1><abnormality2>false</abnormality2><abnormality3>false</abnormality3><abnormality4>false</abnormality4><abnormality5>false</abnormality5><abnormality6>false</abnormality6><abnormality7>false</abnormality7><abnormality8>false</abnormality8><abnormality9>false</abnormality9><abnormality10>false</abnormality10><abnormality11>false</abnormality11><abnormality12>false</abnormality12><abnormality13>false</abnormality13><startingDate>{start_date_str}</startingDate><endDate>{end_date_str}</endDate><monthYearDateFormat></monthYearDateFormat><msgSrc>CS</msgSrc><traction>ALL</traction><cadre>E','M','B</cadre><fghtCochSht>FghtCoch</fghtCochSht><designation>PILOT</designation><active>Active</active><rlevel>DIVISION</rlevel><durationtype>FORTNIGHT</durationtype><combALP>COMB</combALP><slotData>not Slot Data</slotData><desigSelect>OFFICIATING</desigSelect><crewAvailableCheckList>CrewAvailableFIFO</crewAvailableCheckList><contValue>Continuous</contValue><mandatoryRequirementDueFilter>Reft</mandatoryRequirementDueFilter><signOnOFFVal>SignOnVal</signOnOFFVal><locoTraction>ALL</locoTraction><cont_NoncontValue>ContinuousHQ</cont_NoncontValue><contValueOption>SignOnOff</contValueOption><spare>spare</spare><crewHqSignOffSttn>asPerCrewHq</crewHqSignOffSttn><crewBAStatus>SIGNON</crewBAStatus><crewhq>HQ crew at HQ</crewhq><crewIDBaseID>CrewID</crewIDBaseID><crewDesgLevel>Goods</crewDesgLevel><currentMidnignt>CURRENT</currentMidnignt><abnormalityStatus>PN</abnormalityStatus><cadreFilter>notCadre</cadreFilter><year1></year1><crewBookingWrWorWise>CallBookLobbyWise</crewBookingWrWorWise><month1></month1><slotFilter>Previous</slotFilter><preodicCoursesVal>DONE</preodicCoursesVal><detailLevel>Detail</detailLevel><locoGroupVal>ELEC-CONV</locoGroupVal><time>4</time><dutyType>ALL</dutyType><locoTypeWiseVal>Group</locoTypeWiseVal><reportGroupVal>Lobby</reportGroupVal><dfccRadio>ALL</dfccRadio><abnormalityNil>NOT_NIL</abnormalityNil><bmbsRadio>ALL</bmbsRadio><prRportType>realTime</prRportType><serviceTypeInput>FREIGHT</serviceTypeInput><quizResultTypeVal>CategoryWise</quizResultTypeVal><fromSttn>null</fromSttn><toSttn>null</toSttn><slotValueCombo>Slot</slotValueCombo><locoNosearch></locoNosearch><monthCombo>Previous</monthCombo><monthComboValueText>Previous</monthComboValueText><indexValue>0</indexValue><slotValueText>Slot</slotValueText><route>- - -Route- - -</route><auCode>- - Select - -</auCode><weekDates>- - Select - -</weekDates><routename>- - Route- - -</routename><fromSttnNameRoute></fromSttnNameRoute><toSttnNameRoute></toSttnNameRoute><trainingValue>- - Select - -</trainingValue><trackCoverage>ALL</trackCoverage></CMSREPORT></CMSPublishXML>"""
+    
+    url = 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/crew/BookingOnTACrew.do?hmode=BookingOnTACrew'
+    headers = {
+        'Accept': 'text/html, */*; q=0.01',
+        'Origin': 'https://cms.indianrail.gov.in',
+        'Referer': 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=skipMapHrmsId&isResponsive=Y',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+    }
+    
+    data = {'XML': xml_payload, 'lobby': 'KGP', 'lobbyList': 'SER-KGP-KGP'}
+    try:
+        resp = session_obj.post(url, headers=headers, data=data, timeout=30)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            table = soup.find('table', id='BookingOnTATable')
+            if not table: return False
+            tbody = table.find('tbody')
+            if not tbody: return False
+            
+            ta_records = []
+            for row in tbody.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) < 25: continue
+                
+                # In the provided HTML structure:
+                # [5] ORDERING TIME
+                # [15] CREW ID
+                # [24] MOBILE NO
+                crew_id = cols[15].text.strip()
+                if not crew_id: continue
+                ordering_time = cols[5].text.strip()
+                mobile_no = cols[24].text.strip()
+                
+                ta_records.append({
+                    'crew_id': crew_id,
+                    'ordering_time': ordering_time,
+                    'mobile_number': mobile_no
+                })
+            
+            if ta_records:
+                send_state_to_admin('running', 'Syncing TA data to backend DB...')
+                sync_resp = requests.post(f"{FLASK_API_URL}/sync_ta", json=ta_records, headers={'X-API-Secret': API_SECRET})
+                if sync_resp.status_code == 200:
+                    print(f"Successfully synced TA data for {len(ta_records)} crews")
+                    return True
+    except Exception as e:
+        print(f"TA Sync failed: {e}")
+        
+    return False
 
 if __name__ == '__main__':
     main_loop()

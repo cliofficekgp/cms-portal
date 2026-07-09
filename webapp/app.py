@@ -6,6 +6,7 @@ import threading
 import subprocess
 import csv
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
@@ -32,6 +33,8 @@ API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get('DB_PATH', os.path.join(BASE_DIR, 'data', 'crew.db'))
 
+IST = ZoneInfo("Asia/Kolkata")
+
 # Global state for scraper
 scraper_state = {
     'status': 'starting',
@@ -40,7 +43,7 @@ scraper_state = {
     'action_required': False,
     'action_type': '', # 'captcha' or 'otp'
     'submitted_value': None,
-    'last_updated': datetime.now().strftime('%d-%m-%Y %H:%M:%S IST')
+    'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
 }
 
 # ---------------------------------------------------------------------------
@@ -75,7 +78,7 @@ def run_cleanup_thread():
         try:
             print("[Thread] Running cleanup job...")
             conn = get_db()
-            cutoff = datetime.now() - timedelta(days=30)
+            cutoff = datetime.now(IST) - timedelta(days=30)
             
             # Clean crew_submissions
             subs = conn.execute('SELECT id, sign_on_time FROM crew_submissions').fetchall()
@@ -138,9 +141,14 @@ def init_db():
         )
     ''')
 
-    # Migration for found_in_ns if it doesn't exist
+    # Migration for found_in_ns and is_active if they don't exist
     try:
         cur.execute('ALTER TABLE crew_records ADD COLUMN found_in_ns TEXT DEFAULT "no"')
+    except sqlite3.OperationalError:
+        pass # Column likely already exists
+        
+    try:
+        cur.execute('ALTER TABLE crew_records ADD COLUMN is_active INTEGER DEFAULT 1')
     except sqlite3.OperationalError:
         pass # Column likely already exists
 
@@ -174,12 +182,22 @@ def init_db():
         'relief_datetime TEXT',
         'handover_crew_id TEXT',
         'ingest_miss_count INTEGER DEFAULT 0',
-        'departure_time TEXT'
+        'departure_time TEXT',
+        'is_active INTEGER DEFAULT 1'
     ]:
         try:
             cur.execute(f'ALTER TABLE crew_submissions ADD COLUMN {col_def}')
         except sqlite3.OperationalError:
-            pass
+            pass # Column already exists
+            
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS booking_ta_crew (
+            crew_id       TEXT PRIMARY KEY,
+            ordering_time TEXT,
+            mobile_number TEXT,
+            fetched_at    TEXT
+        )
+    ''')
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -304,6 +322,14 @@ def form():
             if sub_dict.get(field):
                 crew_data[field] = sub_dict[field]
                 
+    # Format sign_on_time for display in form (readonly field)
+    if crew_data.get('sign_on_time') and crew_data['sign_on_time'] != '-':
+        try:
+            dt = datetime.strptime(crew_data['sign_on_time'].strip(), '%d-%m-%Y %H:%M')
+            crew_data['sign_on_time'] = dt.strftime('%d/%m/%y %H:%M')
+        except:
+            pass
+
     # Parse CTO date and time for HTML inputs
     if crew_data.get('cto_time') and crew_data['cto_time'] != '-':
         try:
@@ -376,7 +402,7 @@ def submit():
     else:
         departure_time = ''
 
-    submitted_at = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+    submitted_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
 
     conn = get_db()
     conn.execute('''
@@ -650,7 +676,7 @@ def admin_settings():
 @login_required
 def admin_reports():
     conn = get_db()
-    cutoff = datetime.now() - timedelta(days=30)
+    cutoff = datetime.now(IST) - timedelta(days=30)
     
     # We will fetch all submissions and filter manually due to date format DD-MM-YYYY
     subs = conn.execute('SELECT crew_id, name, desig, bpc_no, submitted_at FROM crew_submissions').fetchall()
@@ -688,7 +714,7 @@ def admin_submit_action():
         scraper_state['submitted_value'] = action_value
         scraper_state['action_required'] = False
         scraper_state['message'] = 'Action submitted. Waiting for scraper to process...'
-        scraper_state['last_updated'] = datetime.now().strftime('%d-%m-%Y %H:%M:%S IST')
+        scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return redirect(url_for('admin'))
 
 @app.route('/api/scraper/state', methods=['POST'])
@@ -705,7 +731,7 @@ def update_scraper_state():
         scraper_state['image_base64'] = payload.get('image_base64', '')
         scraper_state['submitted_value'] = None # reset
     
-    scraper_state['last_updated'] = datetime.now().strftime('%d-%m-%Y %H:%M:%S IST')
+    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return jsonify({'success': True})
 
 @app.route('/api/scraper/action', methods=['GET'])
@@ -722,12 +748,20 @@ def get_scraper_action():
 def crew_list():
     conn = get_db()
     # Full join of records and submissions
-    # We will fetch all records, and then left join with latest submission data.
-    # To do a full join simply in SQLite, we can use a UNION approach or just do it in Python.
-    # The user asked for "Join, which include all the records from crew_records and crew_submissions, full join"
-    # To get the best of both, we will combine them in Python for easier handling,
-    # or use a complex query. Let's do it via SQL:
     
+    # Mark signed off crews as inactive
+    conn.execute('''
+        UPDATE crew_records 
+        SET is_active = 0 
+        WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
+    ''')
+    conn.execute('''
+        UPDATE crew_submissions 
+        SET is_active = 0 
+        WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
+    ''')
+    conn.commit()
+
     query = '''
     SELECT 
         COALESCE(r.crew_id, s.crew_id) AS crew_id,
@@ -751,7 +785,9 @@ def crew_list():
         s.relief_datetime,
         s.handover_crew_id,
         COALESCE(s.ingest_miss_count, 0) AS ingest_miss_count,
-        s.departure_time
+        s.departure_time,
+        ta.ordering_time,
+        ta.mobile_number
     FROM crew_records r
     LEFT JOIN (
         SELECT * FROM crew_submissions 
@@ -759,6 +795,8 @@ def crew_list():
             SELECT MAX(id) FROM crew_submissions GROUP BY crew_id
         )
     ) s ON r.crew_id = s.crew_id
+    LEFT JOIN booking_ta_crew ta ON ta.crew_id = COALESCE(r.crew_id, s.crew_id)
+    WHERE COALESCE(r.is_active, 1) = 1 AND COALESCE(s.is_active, 1) = 1
     
     UNION
     
@@ -784,7 +822,9 @@ def crew_list():
         s.relief_datetime,
         s.handover_crew_id,
         COALESCE(s.ingest_miss_count, 0) AS ingest_miss_count,
-        s.departure_time
+        s.departure_time,
+        ta.ordering_time,
+        ta.mobile_number
     FROM (
         SELECT * FROM crew_submissions 
         WHERE id IN (
@@ -792,6 +832,8 @@ def crew_list():
         )
     ) s
     LEFT JOIN crew_records r ON r.crew_id = s.crew_id
+    LEFT JOIN booking_ta_crew ta ON ta.crew_id = COALESCE(r.crew_id, s.crew_id)
+    WHERE COALESCE(r.is_active, 1) = 1 AND COALESCE(s.is_active, 1) = 1
     '''
     
     rows = conn.execute(query).fetchall()
@@ -799,14 +841,15 @@ def crew_list():
     
     data = [dict(row) for row in rows]
     
-    now = datetime.now()
+    now = datetime.now(IST)
     
     def parse_dt(val):
         if not val or val == '-': return None
         val = val.strip()
         for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
             try:
-                return datetime.strptime(val, fmt)
+                dt = datetime.strptime(val, fmt)
+                return dt.replace(tzinfo=IST)
             except ValueError:
                 pass
         return None
@@ -839,11 +882,11 @@ def crew_list():
                 p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
                 row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
 
-        # Format dates universally (DD-MM-YY HH:MM)
+        # Format dates universally (DD/MM/YY HH:MM)
         for col in ['sign_on_time', 'cto_time', 'relief_datetime', 'departure_time']:
             dt = parse_dt(row.get(col, ''))
             if dt:
-                row[col] = dt.strftime('%d-%m-%y %H:%M')
+                row[col] = dt.strftime('%d/%m/%y %H:%M')
             elif col in row and not row[col]:
                 row[col] = '-'
 
@@ -926,6 +969,36 @@ def api_stations():
         print("Error reading stations:", e)
     return jsonify(stations)
 
+@app.route('/api/sync_ta', methods=['POST'])
+def api_sync_ta():
+    auth = request.headers.get('X-API-Secret', '')
+    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True)
+    if not payload or not isinstance(payload, list): return jsonify({'error': 'Invalid payload'}), 400
+
+    conn = get_db()
+    fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+
+    for rec in payload:
+        crew_id = rec.get('crew_id')
+        if not crew_id: continue
+        ordering_time = rec.get('ordering_time', '')
+        mobile_number = rec.get('mobile_number', '')
+        
+        conn.execute('''
+            INSERT INTO booking_ta_crew (crew_id, ordering_time, mobile_number, fetched_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(crew_id) DO UPDATE SET
+                ordering_time=excluded.ordering_time,
+                mobile_number=excluded.mobile_number,
+                fetched_at=excluded.fetched_at
+        ''', (crew_id, ordering_time, mobile_number, fetched_at))
+        
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'success', 'count': len(payload)})
+
 @app.route('/api/sync', methods=['POST'])
 def api_sync():
     auth = request.headers.get('X-API-Secret', '')
@@ -936,7 +1009,7 @@ def api_sync():
 
     conn = get_db()
     inserted = updated = skipped = 0
-    synced_at = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+    synced_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
 
     for crew_id, rec in payload.items():
         existing = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
