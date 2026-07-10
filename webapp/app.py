@@ -773,7 +773,11 @@ def crew_list():
     conn.execute('''
         UPDATE crew_submissions 
         SET is_active = 0 
-        WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
+        WHERE is_active = 1 
+        AND crew_id IN (
+            SELECT crew_id FROM crew_records 
+            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
+        )
     ''')
     conn.commit()
 
@@ -897,7 +901,11 @@ def crew_list():
                 p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
                 row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
 
-        # Format dates universally (DD/MM/YY HH:MM)
+        # Capture raw datetimes for sorting BEFORE display formatting overwrites the strings
+        row['_sign_on_dt'] = sign_on_dt if sign_on_dt else datetime.min.replace(tzinfo=IST)
+        row['_cto_dt'] = parse_dt(row.get('cto_time')) or datetime.min.replace(tzinfo=IST)
+
+        # Format dates universally (DD/MM/YY HH:MM) — happens AFTER capturing sort keys above
         for col in ['sign_on_time', 'cto_time', 'relief_datetime', 'departure_time']:
             dt = parse_dt(row.get(col, ''))
             if dt:
@@ -905,12 +913,16 @@ def crew_list():
             elif col in row and not row[col]:
                 row[col] = '-'
 
-    def cto_sort_key(r):
-        dt = parse_dt(r.get('cto_time'))
-        return dt if dt else datetime.min
-            
-    data.sort(key=cto_sort_key, reverse=True)
-    
+    def list_sort_key(r):
+        return (r['_sign_on_dt'], r['_cto_dt'])
+
+    data.sort(key=list_sort_key, reverse=True)
+
+    # Clean up the internal sort-only keys so they don't leak into the template unnecessarily
+    for row in data:
+        row.pop('_sign_on_dt', None)
+        row.pop('_cto_dt', None)
+
     return render_template('crew_list.html', crew_list=data)
 
 @app.route('/api/save_ns_status', methods=['POST'])
@@ -1069,20 +1081,31 @@ def api_sync():
             ))
             inserted += 1
 
+    MISS_THRESHOLD = 2  # missed 2 consecutive syncs (~1hr, given 30-min scraper interval) = treat as signed off
+
     payload_ids = set(payload.keys())
     all_db = conn.execute('SELECT crew_id FROM crew_records').fetchall()
     for row in all_db:
         cid = row['crew_id']
         if cid not in payload_ids:
-            sub = conn.execute('SELECT id FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1', (cid,)).fetchone()
+            sub = conn.execute(
+                'SELECT id, ingest_miss_count FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1',
+                (cid,)
+            ).fetchone()
             if sub:
-                conn.execute('UPDATE crew_submissions SET ingest_miss_count = ingest_miss_count + 1 WHERE id = ?', (sub['id'],))
+                new_miss_count = (sub['ingest_miss_count'] or 0) + 1
+                conn.execute('UPDATE crew_submissions SET ingest_miss_count = ? WHERE id = ?', (new_miss_count, sub['id']))
+                if new_miss_count >= MISS_THRESHOLD:
+                    conn.execute('''
+                        UPDATE crew_records
+                        SET sign_off_time = ?, synced_at = ?
+                        WHERE crew_id = ? AND (sign_off_time IS NULL OR sign_off_time = '' OR sign_off_time = '-')
+                    ''', (synced_at, synced_at, cid))
             else:
                 conn.execute('DELETE FROM crew_records WHERE crew_id = ?', (cid,))
         else:
-            # reset miss count if found
             conn.execute('UPDATE crew_submissions SET ingest_miss_count = 0 WHERE crew_id = ?', (cid,))
-
+    
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok', 'inserted': inserted, 'updated': updated, 'protected': skipped})
