@@ -50,7 +50,7 @@ API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 
-def is_proxy_available(host=os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1", port=1080)):
+def is_proxy_available(host=os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1"), port=1080):
     try:
         with socket.create_connection((host, port), timeout=1):
             return True
