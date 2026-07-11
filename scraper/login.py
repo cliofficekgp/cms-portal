@@ -50,7 +50,7 @@ API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 
-def is_proxy_available(host="127.0.0.1", port=1080):
+def is_proxy_available(host=os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1", port=1080)):
     try:
         with socket.create_connection((host, port), timeout=1):
             return True
@@ -282,9 +282,10 @@ def main_loop():
             cookie_valid = False
             session = requests.Session()
             if USE_PROXY:
+                proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
                 session.proxies = {
-                    'http': 'socks5h://127.0.0.1:1080',
-                    'https': 'socks5h://127.0.0.1:1080',
+                    'http': 'socks5h://{proxy_host}:1080',
+                    'https': 'socks5h://{proxy_host}:1080',
                 }
             if os.path.exists(COOKIES_FILE):
                 with open(COOKIES_FILE, 'r') as cf:
@@ -336,7 +337,8 @@ def main_loop():
             options.add_argument("--safebrowsing-disable-auto-update")
             options.add_argument("--js-flags=--max-old-space-size=256")
             if USE_PROXY:
-                options.add_argument('--proxy-server=socks5://127.0.0.1:1080')
+                proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
+                options.add_argument(f'--proxy-server=socks5://{proxy_host}:1080')
 
             # Detect Chromium binary path (Linux vs Windows)
             chrome_bin = os.environ.get('CHROME_BIN', '')
