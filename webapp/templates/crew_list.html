@@ -3,248 +3,887 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CMS Crew List</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>CMS – Crew List Monitor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .sortable { cursor: pointer; }
-        .sortable:hover { background-color: #f1f5f9; }
-        th { user-select: none; }
-        .sort-icon { display: inline-block; width: 12px; height: 12px; margin-left: 4px; opacity: 0.3; }
-        .asc .sort-icon { opacity: 1; transform: rotate(180deg); }
-        .desc .sort-icon { opacity: 1; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #0f172a; min-height: 100vh; color: #e2e8f0; font-size: 13px; }
+        .page-wrapper { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        /* ── HEADER ── */
+        .header {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #2563eb 100%);
+            padding: 9px 16px; display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; flex-shrink: 0;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .header-left { display: flex; flex-direction: column; gap: 1px; }
+        .header-title { font-size: 15px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 7px; }
+        .header-subtitle { font-size: 10px; color: #93c5fd; }
+        .header-center { display: flex; align-items: center; flex: 1; max-width: 320px; margin: 0 auto; }
+        .search-wrap { position: relative; width: 100%; }
+        .search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #93c5fd; pointer-events: none; }
+        .search-input {
+            width: 100%; padding: 6px 8px 6px 28px;
+            background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px; color: #fff; font-size: 12px; font-family: inherit; outline: none;
+        }
+        .search-input::placeholder { color: #93c5fd; }
+        .search-input:focus { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.4); }
+        .header-right { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+        .save-status { font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 6px; transition: all 0.3s; }
+        .save-status.saving { background: #f59e0b; color: #1c1917; }
+        .save-status.saved  { background: #22c55e; color: #052e16; }
+        .save-status.hidden { display: none; }
+        .timer-badge { font-size: 10px; color: #bfdbfe; background: rgba(255,255,255,0.1); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+        .btn-save-now {
+            font-size: 11px; font-weight: 600; padding: 5px 11px;
+            border-radius: 6px; background: rgba(34,197,94,0.25); color: #86efac;
+            border: 1px solid rgba(34,197,94,0.4); cursor: pointer; font-family: inherit;
+            transition: all 0.2s; white-space: nowrap;
+        }
+        .btn-save-now:hover { background: rgba(34,197,94,0.45); color: #fff; }
+        .btn-nav { font-size: 11px; font-weight: 500; padding: 5px 9px; border-radius: 6px; color: #bfdbfe; text-decoration: none; transition: all 0.2s; }
+        .btn-nav:hover { background: rgba(255,255,255,0.15); color: #fff; }
+        .btn-logout { font-size: 11px; font-weight: 500; padding: 5px 9px; border-radius: 6px; background: rgba(239,68,68,0.35); color: #fca5a5; text-decoration: none; border: 1px solid rgba(239,68,68,0.4); transition: all 0.2s; }
+        .btn-logout:hover { background: rgba(239,68,68,0.55); color: #fff; }
+
+        /* ── CONTROLS BAR ── */
+        .controls-bar {
+            background: #1e293b; padding: 5px 16px;
+            display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid #334155; flex-shrink: 0; flex-wrap: wrap; gap: 6px;
+        }
+        .legend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #94a3b8; }
+        .legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+        .dot-cms   { background: #3b82f6; }
+        .dot-sub   { background: #f59e0b; }
+        .dot-admin { background: #22c55e; }
+        .dot-red   { background: #ef4444; }
+        .dot-green { background: #22c55e; }
+        .btn-export {
+            font-size: 11px; font-weight: 500; padding: 4px 9px;
+            border-radius: 6px; background: #1e40af; color: #bfdbfe;
+            border: 1px solid #3b82f6; cursor: pointer;
+            display: flex; align-items: center; gap: 5px; transition: all 0.2s;
+        }
+        .btn-export:hover { background: #2563eb; color: #fff; }
+
+        /* ── TABLE ── */
+        .table-wrap { overflow: auto; flex: 1; }
+        table { width: 100%; border-collapse: collapse; }
+        thead { position: sticky; top: 0; z-index: 20; }
+        thead tr { background: #1e293b; }
+        th {
+            padding: 6px 5px; font-size: 10px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8;
+            white-space: nowrap; border-bottom: 2px solid #334155;
+            user-select: none; cursor: pointer;
+        }
+        th:hover { color: #e2e8f0; background: #263347; }
+        th.sorted-asc::after  { content: ' ▲'; font-size: 8px; color: #60a5fa; }
+        th.sorted-desc::after { content: ' ▼'; font-size: 8px; color: #60a5fa; }
+
+        tbody tr { border-bottom: 1px solid #1e293b; transition: background 0.15s; }
+        tbody tr:hover { background: rgba(30,58,138,0.25) !important; }
+        tbody tr.row-ns     { background: rgba(99,102,241,0.22) !important; font-weight: 600; }
+        tbody tr.row-miss   { background: rgba(239,68,68,0.13) !important; }
+        tbody tr.row-relief { background: rgba(245,158,11,0.10) !important; }
+
+        td { padding: 4px 5px; color: #cbd5e1; white-space: nowrap; vertical-align: middle; }
+        td.crew-id-cell { font-weight: 700; color: #e2e8f0; }
+        td.name-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+        .td-center { text-align: center; }
+
+        /* ── DUTY HOURS ── */
+        .duty-cell {
+            font-weight: 700; border-radius: 4px; padding: 2px 6px;
+            text-align: center; font-size: 12px; min-width: 52px; display: inline-block;
+        }
+        .dh-critical { background: #7f1d1d; color: #fca5a5; }
+        .dh-high     { background: #92400e; color: #fcd34d; }
+        .dh-mid      { background: #713f12; color: #fde68a; }
+        .dh-low      { background: #14532d; color: #86efac; }
+        .dh-ok       { background: #052e16; color: #4ade80; }
+
+        /* ── SOURCE COLORS ── */
+        .src-cms   { border-left: 3px solid #3b82f6 !important; }
+        .src-sub   { border-left: 3px solid #f59e0b !important; }
+        .src-admin { border-left: 3px solid #22c55e !important; background: rgba(34,197,94,0.07) !important; }
+
+        /* ── EDITABLE CELLS (loco / train / bpc) ── */
+        .editable {
+            min-width: 56px; outline: none; border-radius: 4px; padding: 2px 4px;
+            cursor: text; transition: background 0.15s, box-shadow 0.15s;
+            display: inline-block; text-align: center;
+        }
+        .editable:hover { background: rgba(99,102,241,0.15); box-shadow: 0 0 0 1px #4f46e5; }
+        .editable:focus { background: rgba(99,102,241,0.25); box-shadow: 0 0 0 2px #6366f1; color: #fff; }
+        .editable.field-dirty { box-shadow: 0 0 0 1px #f59e0b !important; }
+
+        /* ── STATION AUTOCOMPLETE ── */
+        .ac-wrap { position: relative; display: inline-block; min-width: 72px; }
+        .ac-input {
+            width: 100%; padding: 2px 5px; background: transparent;
+            border: 1px solid transparent; border-radius: 4px;
+            color: #e2e8f0; font-size: 12px; font-family: inherit;
+            outline: none; transition: all 0.15s; text-align: center; text-transform: uppercase;
+        }
+        .ac-input:hover { background: rgba(99,102,241,0.15); border-color: #4f46e5; }
+        .ac-input:focus { background: rgba(99,102,241,0.25); border-color: #6366f1; color: #fff; }
+        .ac-input.field-dirty { border-color: #f59e0b !important; }
+        .ac-dropdown {
+            position: absolute; left: 0; top: calc(100% + 2px); z-index: 200;
+            background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-height: 200px;
+            overflow-y: auto; min-width: 200px; display: none;
+        }
+        .ac-item {
+            padding: 6px 10px; font-size: 11px; color: #cbd5e1; cursor: pointer;
+            display: flex; gap: 8px; align-items: center;
+        }
+        .ac-item:hover { background: rgba(99,102,241,0.25); color: #fff; }
+        .ac-code { font-weight: 700; color: #60a5fa; min-width: 36px; }
+        .ac-name { color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* ── DATETIME INPUT ── */
+        .dt-input {
+            background: transparent; border: 1px solid transparent; border-radius: 4px;
+            color: #e2e8f0; font-size: 11px; font-family: inherit;
+            outline: none; padding: 2px 4px; cursor: pointer; width: 100%;
+            transition: all 0.15s; text-align: center;
+            color-scheme: dark;
+        }
+        .dt-input:hover { background: rgba(99,102,241,0.15); border-color: #4f46e5; }
+        .dt-input:focus { background: rgba(99,102,241,0.25); border-color: #6366f1; }
+        .dt-input.field-dirty { border-color: #f59e0b !important; }
+
+        /* ── RELIEF CELL ── */
+        .relief-wrap { display: flex; flex-direction: column; gap: 3px; align-items: center; min-width: 150px; }
+        .relief-check-row { display: flex; align-items: center; gap: 5px; }
+        .relief-toggle { width: 14px; height: 14px; cursor: pointer; accent-color: #f59e0b; }
+        .relief-toggle-label { font-size: 10px; color: #94a3b8; }
+        .relief-fields { display: flex; flex-direction: column; gap: 3px; width: 100%; }
+        .relief-fields.hidden-fields { display: none; }
+        .relief-stn-wrap { position: relative; }
+        .relief-stn-input {
+            width: 100%; padding: 2px 5px; background: rgba(255,255,255,0.05);
+            border: 1px solid #334155; border-radius: 4px;
+            color: #e2e8f0; font-size: 11px; font-family: inherit; outline: none;
+            text-transform: uppercase; text-align: center;
+        }
+        .relief-stn-input:focus { border-color: #f59e0b; background: rgba(245,158,11,0.08); }
+        .relief-dt-input {
+            width: 100%; background: rgba(255,255,255,0.05); border: 1px solid #334155;
+            border-radius: 4px; color: #e2e8f0; font-size: 11px; font-family: inherit;
+            outline: none; padding: 2px 4px; cursor: pointer; text-align: center;
+            color-scheme: dark;
+        }
+        .relief-dt-input:focus { border-color: #f59e0b; background: rgba(245,158,11,0.08); }
+        .relief-ac-dropdown {
+            position: absolute; left: 0; top: calc(100% + 2px); z-index: 200;
+            background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-height: 160px;
+            overflow-y: auto; min-width: 180px; display: none;
+        }
+
+        /* ── PHONE CELL ── */
+        .phone-wrap { display: flex; align-items: flex-start; gap: 4px; }
+        .phone-numbers { flex: 1; font-size: 11px; line-height: 1.5; }
+        .phone-num-line { display: block; }
+        .btn-add-phone {
+            width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+            background: #1e40af; border: 1px solid #3b82f6;
+            color: #93c5fd; font-size: 14px; font-weight: 700;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s; line-height: 1; margin-top: 1px;
+        }
+        .btn-add-phone:hover { background: #2563eb; color: #fff; }
+
+        /* ── PHONE POPOVER ── */
+        .phone-popover {
+            position: fixed; z-index: 1000; background: #1e293b;
+            border: 1px solid #334155; border-radius: 10px; padding: 14px;
+            min-width: 240px; box-shadow: 0 20px 60px rgba(0,0,0,0.7); display: none;
+        }
+        .phone-popover.visible { display: block; }
+        .popover-title { font-size: 12px; font-weight: 600; color: #e2e8f0; margin-bottom: 8px; }
+        .popover-input {
+            width: 100%; padding: 7px 10px; background: #0f172a;
+            border: 1px solid #475569; border-radius: 6px;
+            color: #e2e8f0; font-size: 12px; font-family: inherit; outline: none;
+        }
+        .popover-input:focus { border-color: #3b82f6; }
+        .popover-actions { display: flex; gap: 6px; margin-top: 8px; }
+        .btn-pop-save { flex: 1; padding: 6px; background: #1d4ed8; color: #fff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.2s; }
+        .btn-pop-save:hover { background: #2563eb; }
+        .btn-pop-cancel { padding: 6px 10px; background: #334155; color: #94a3b8; border: none; border-radius: 6px; font-size: 11px; cursor: pointer; font-family: inherit; transition: background 0.2s; }
+        .btn-pop-cancel:hover { background: #475569; }
+
+        .ns-checkbox { accent-color: #6366f1; width: 14px; height: 14px; cursor: pointer; }
+        .empty-row td { text-align: center; color: #475569; padding: 40px; font-size: 13px; }
+        .toast {
+            position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+            background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+            padding: 10px 16px; font-size: 12px; color: #e2e8f0;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            transform: translateY(80px); opacity: 0; transition: all 0.3s ease;
+        }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { border-left: 4px solid #22c55e; }
+        .toast.error   { border-left: 4px solid #ef4444; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen p-4">
+<body>
+<div class="page-wrapper">
 
-    <div class="mx-auto bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
-        <!-- Header -->
-        <div class="bg-indigo-600 px-6 py-4 border-b border-gray-200 flex justify-between items-center text-white">
-            <div>
-                <h2 class="text-xl font-bold flex items-center">
-                    <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
-                    Crew List Monitor
-                </h2>
-                <p class="text-xs text-indigo-200 mt-1" id="refreshTimerText">Next auto-refresh in 5:00</p>
+    <!-- HEADER -->
+    <div class="header">
+        <div class="header-left">
+            <div class="header-title">
+                <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+                </svg>
+                Crew List Monitor
             </div>
-            <div class="flex items-center space-x-4">
-                <span id="saveStatus" class="text-xs font-medium px-2 py-1 bg-white/20 rounded hidden">Saving...</span>
-                <a href="/admin" class="text-sm font-medium text-indigo-200 hover:text-white transition-colors">Admin</a>
-                <a href="/admin/logout" class="text-sm font-medium bg-red-500/40 hover:bg-red-500/60 text-white px-3 py-2 rounded-lg transition-colors">Logout</a>
+            <div class="header-subtitle">Live duty hours · Auto-save every 5 min</div>
+        </div>
+        <div class="header-center">
+            <div class="search-wrap">
+                <svg class="search-icon" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
+                </svg>
+                <input type="text" id="searchInput" class="search-input" placeholder="Search crew…">
             </div>
         </div>
-
-        <!-- Controls (Search & Export) -->
-        <div class="bg-white px-6 py-3 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-            <div class="relative w-64">
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg class="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
-                    </svg>
-                </div>
-                <input type="text" id="searchInput" class="block w-full pl-10 pr-3 py-1.5 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Search crews...">
-            </div>
-            <div>
-                <button onclick="exportTableToCSV('crew_list.csv')" class="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    <svg class="w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                    Export Excel
-                </button>
-            </div>
-        </div>
-
-        <!-- Table Container -->
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider sticky top-0 shadow-sm z-10">
-                    <tr>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="0">Crew ID <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="1">Name <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="2">Sign On <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="3">PDD <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="4">Duty Hrs <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="5">From Stn <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="6">To Stn <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="7">Loco No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="8">Train No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="9">BPC No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="10">Location <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="11">CTO Time <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="12">Relief <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="13">Ord Time <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="14">Mobile No <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-                        <th class="px-2 py-1.5 font-medium sortable whitespace-nowrap" data-sort="15">Found in NS? <svg class="sort-icon inline" width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></th>
-
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200 text-xs" id="tableBody">
-                    {% for crew in crew_list %}
-                    {% set base_bg = 'bg-red-100/60' if crew.ingest_miss_count >= 3 else ('bg-amber-100/60' if crew.is_relief == 1 else '') %}
-                    <tr class="transition-colors hover:bg-gray-100 {{ 'bg-indigo-300 font-semibold' if crew.found_in_ns == 'yes' else base_bg }}">
-                        <td class="px-2 py-1.5 font-medium text-gray-900 whitespace-nowrap">{{ crew.crew_id }}</td>
-                        <td class="px-2 py-1.5 text-gray-800 truncate max-w-[120px]" title="{{ crew.name }}">{{ crew.name }}</td>
-                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.sign_on_time }}</td>
-                        <td class="px-2 py-1.5 text-red-600 font-bold whitespace-nowrap">{{ crew.pdd }}</td>
-                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.duty_hrs if crew.duty_hrs else '-' }}</td>
-                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.from_sttn }}</td>
-                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.to_sttn if crew.to_sttn else '-' }}</td>
-                        <td class="px-2 py-1.5 text-gray-700">{{ crew.loco_no if crew.loco_no else '-' }}</td>
-                        <td class="px-2 py-1.5 text-gray-700">{{ crew.train_no if crew.train_no else '-' }}</td>
-                        <td class="px-2 py-1.5 text-gray-700">{{ crew.bpc_no if crew.bpc_no else '-' }}</td>
-                        <td class="px-2 py-1.5 text-gray-800 font-medium">{{ crew.current_location if crew.current_location else '-' }}</td>
-                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.cto_time if crew.cto_time else '-' }}</td>
-                        <td class="px-2 py-1.5 text-amber-800 whitespace-nowrap">
-                            {% if crew.is_relief == 1 %}
-                                <div class="font-bold">{{ crew.relief_station }}</div>
-                                <div class="text-[10px]">{{ crew.relief_datetime }}</div>
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.ordering_time if crew.ordering_time else '-' }}</td>
-                        <td class="px-2 py-1.5 text-gray-700 whitespace-nowrap">{{ crew.mobile_number if crew.mobile_number else '-' }}</td>
-                        <td class="px-2 py-1.5 text-center" data-val="{{ '1' if crew.found_in_ns == 'yes' else '0' }}">
-                            <input type="checkbox" class="ns-checkbox w-3.5 h-3.5 text-indigo-600 bg-gray-100 border-gray-400 rounded focus:ring-indigo-500 cursor-pointer" 
-                                data-crew="{{ crew.crew_id }}" data-is-relief="{{ crew.is_relief }}" {% if crew.found_in_ns == 'yes' %}checked{% endif %}>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    {% if not crew_list %}
-                    <tr>
-                        <td colspan="13" class="px-4 py-8 text-center text-gray-500 font-medium">No crew records found.</td>
-                    </tr>
-                    {% endif %}
-                </tbody>
-            </table>
+        <div class="header-right">
+            <span id="saveStatus" class="save-status hidden">Saving…</span>
+            <span class="timer-badge" id="timerBadge">Save in 5:00</span>
+            <button class="btn-save-now" onclick="saveAndRefresh(true)">💾 Save Now</button>
+            <a href="/admin" class="btn-nav">Admin</a>
+            <a href="/admin/logout" class="btn-logout">Logout</a>
         </div>
     </div>
 
-    <script>
-        // --- Color Toggling ---
-        document.querySelectorAll('.ns-checkbox').forEach(cb => {
-            cb.addEventListener('change', function() {
-                const tr = this.closest('tr');
-                const td = this.closest('td');
-                const isRelief = this.dataset.isRelief === "1";
-                if (this.checked) {
-                    tr.classList.remove('bg-amber-100/60');
-                    tr.classList.add('bg-indigo-300', 'font-semibold');
-                    td.setAttribute('data-val', '1');
-                } else {
-                    tr.classList.remove('bg-indigo-300', 'font-semibold');
-                    if(isRelief) tr.classList.add('bg-amber-100/60');
-                    td.setAttribute('data-val', '0');
-                }
+    <!-- CONTROLS BAR -->
+    <div class="controls-bar">
+        <div class="legend">
+            <span style="font-size:10px;font-weight:600;color:#64748b;margin-right:2px;">DATA SOURCE:</span>
+            <span class="legend-item"><span class="legend-dot dot-cms"></span> CMS Record</span>
+            <span class="legend-item"><span class="legend-dot dot-sub"></span> Crew Submission</span>
+            <span class="legend-item"><span class="legend-dot dot-admin"></span> Admin Edit</span>
+            <span style="margin-left:8px;border-left:1px solid #334155;padding-left:8px;" class="legend-item">
+                <span class="legend-dot dot-red"></span> High Duty
+            </span>
+            <span class="legend-item"><span class="legend-dot dot-green"></span> Low Duty</span>
+        </div>
+        <button onclick="exportTableToCSV('crew_list.csv')" class="btn-export">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Export
+        </button>
+    </div>
+
+    <!-- TABLE -->
+    <div class="table-wrap">
+        <table id="crewTable">
+            <thead>
+                <tr>
+                    <th data-col="0">Crew ID</th>
+                    <th data-col="1">Name</th>
+                    <th data-col="2">Sign On</th>
+                    <th data-col="3">PDD</th>
+                    <th data-col="4">Duty Hrs</th>
+                    <th data-col="5">From</th>
+                    <th data-col="6">To</th>
+                    <th data-col="7" style="text-align:center">Loco No</th>
+                    <th data-col="8">Train No</th>
+                    <th data-col="9" style="text-align:center">BPC No</th>
+                    <th data-col="10" style="text-align:center">Location</th>
+                    <th data-col="11" style="text-align:center">CTO Time</th>
+                    <th data-col="12" style="text-align:center">Relief</th>
+                    <th data-col="13">Ord Time</th>
+                    <th data-col="14">Mobile No</th>
+                    <th data-col="15">Found NS?</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                {% for crew in crew_list %}
+                {% set src = crew._src %}
+                {% set base_class = 'row-miss' if crew.ingest_miss_count >= 3 else ('row-relief' if crew.is_relief == 1 else '') %}
+                <tr class="{{ 'row-ns' if crew.found_in_ns == 'yes' else base_class }}"
+                    data-crew="{{ crew.crew_id }}">
+
+                    <!-- Crew ID -->
+                    <td class="crew-id-cell">{{ crew.crew_id }}</td>
+
+                    <!-- Name -->
+                    <td class="name-cell" title="{{ crew.name }}">{{ crew.name }}</td>
+
+                    <!-- Sign On -->
+                    <td style="white-space:nowrap">{{ crew.sign_on_time }}</td>
+
+                    <!-- PDD -->
+                    <td style="color:#f87171;font-weight:700;">{{ crew.pdd }}</td>
+
+                    <!-- Duty Hours (live) -->
+                    <td>
+                        <span class="duty-cell" id="duty-{{ crew.crew_id }}"
+                              data-signon="{{ crew._sign_on_iso }}">
+                            {{ crew.duty_hrs if crew.duty_hrs else '–' }}
+                        </span>
+                    </td>
+
+                    <!-- From Stn -->
+                    <td>{{ crew.from_sttn }}</td>
+
+                    <!-- To Stn -->
+                    <td>{{ crew.to_sttn if crew.to_sttn else '–' }}</td>
+
+                    <!-- Loco No (editable, center) -->
+                    <td class="src-{{ src.loco_no }} td-center">
+                        <span class="editable" contenteditable="true"
+                              data-field="loco_no" data-crew="{{ crew.crew_id }}">{{ crew.loco_no if crew.loco_no else '' }}</span>
+                    </td>
+
+                    <!-- Train No (editable) -->
+                    <td class="src-{{ src.train_no }}">
+                        <span class="editable" contenteditable="true"
+                              data-field="train_no" data-crew="{{ crew.crew_id }}">{{ crew.train_no if crew.train_no else '' }}</span>
+                    </td>
+
+                    <!-- BPC No (editable, center) -->
+                    <td class="src-{{ src.bpc_no }} td-center">
+                        <span class="editable" contenteditable="true"
+                              data-field="bpc_no" data-crew="{{ crew.crew_id }}">{{ crew.bpc_no if crew.bpc_no else '' }}</span>
+                    </td>
+
+                    <!-- Location (autocomplete station, center) -->
+                    <td class="src-{{ src.current_location }} td-center">
+                        <div class="ac-wrap">
+                            <input type="text" class="ac-input"
+                                   data-field="current_location" data-crew="{{ crew.crew_id }}"
+                                   value="{{ crew.current_location if crew.current_location else '' }}"
+                                   placeholder="Stn" autocomplete="off" maxlength="10">
+                            <div class="ac-dropdown"></div>
+                        </div>
+                    </td>
+
+                    <!-- CTO Time (datetime picker, center) -->
+                    <td class="src-{{ src.cto_time }} td-center">
+                        <input type="datetime-local" class="dt-input"
+                               data-field="cto_time" data-crew="{{ crew.crew_id }}"
+                               data-raw="{{ crew.cto_time if crew.cto_time else '' }}"
+                               title="{{ crew.cto_time if crew.cto_time else 'Not set' }}">
+                    </td>
+
+                    <!-- Relief (checkbox + station autocomplete + datetime) -->
+                    <td class="src-{{ src.relief_station }} td-center">
+                        {% if crew.is_relief == 1 %}
+                            <div class="flex flex-col items-center">
+                                <span style="color:#f59e0b;font-weight:700;">{{ crew.relief_station if crew.relief_station else 'RELIEF' }}</span>
+                                <span style="font-size:10px;color:#94a3b8;margin-top:2px;">{{ crew.relief_datetime if crew.relief_datetime else '' }}</span>
+                            </div>
+                        {% else %}
+                            <div class="relief-wrap">
+                                <div class="relief-check-row">
+                                    <input type="checkbox" class="relief-toggle" data-crew="{{ crew.crew_id }}">
+                                    <span class="relief-toggle-label">Relief</span>
+                                </div>
+                                <div class="relief-fields hidden-fields">
+                                    <div class="relief-stn-wrap">
+                                        <input type="text" class="relief-stn-input"
+                                               data-field="relief_station" data-crew="{{ crew.crew_id }}"
+                                               placeholder="Station" autocomplete="off" maxlength="10">
+                                        <div class="relief-ac-dropdown"></div>
+                                    </div>
+                                    <input type="datetime-local" class="relief-dt-input"
+                                           data-field="relief_datetime" data-crew="{{ crew.crew_id }}"
+                                           data-raw="">
+                                </div>
+                            </div>
+                        {% endif %}
+                    </td>
+
+                    <!-- Ord Time -->
+                    <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '–' }}</td>
+
+                    <!-- Mobile No (all numbers + add button) -->
+                    <td>
+                        <div class="phone-wrap">
+                            <span class="phone-numbers" id="phone-{{ crew.crew_id }}">
+                                {% if crew.mobile_number %}
+                                    {% for num in crew.mobile_number.split(',') %}
+                                        <span class="phone-num-line">{{ num.strip() }}</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span style="color:#475569">–</span>
+                                {% endif %}
+                            </span>
+                            <button class="btn-add-phone" title="Add phone number"
+                                    onclick="openPhonePopover(event, '{{ crew.crew_id }}')">+</button>
+                        </div>
+                    </td>
+
+                    <!-- Found in NS -->
+                    <td style="text-align:center;" data-val="{{ '1' if crew.found_in_ns == 'yes' else '0' }}">
+                        <input type="checkbox" class="ns-checkbox"
+                               data-crew="{{ crew.crew_id }}" data-is-relief="{{ crew.is_relief }}"
+                               {% if crew.found_in_ns == 'yes' %}checked{% endif %}>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not crew_list %}
+                <tr class="empty-row"><td colspan="16">No crew records found.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- PHONE POPOVER -->
+<div id="phonePopover" class="phone-popover">
+    <div class="popover-title" id="popoverTitle">Add Phone Number</div>
+    <input type="tel" id="popoverInput" class="popover-input" placeholder="Enter number" maxlength="15">
+    <div class="popover-actions">
+        <button class="btn-pop-save" onclick="submitPhone()">Save</button>
+        <button class="btn-pop-cancel" onclick="closePhonePopover()">Cancel</button>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* ================================================================
+   UTILITIES
+   ================================================================ */
+function getISTNow() {
+    const now = new Date();
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+    return new Date(utcMs + 5.5 * 3600000);
+}
+
+function toISOLocal(dt) {
+    // Date object -> "YYYY-MM-DDTHH:MM" for datetime-local input
+    const pad = n => String(n).padStart(2, '0');
+    return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+function fromDatetimeLocal(str) {
+    // "2026-07-11T15:30" -> "11-07-2026 15:30" (format backend can parse)
+    if (!str) return '';
+    const [datePart, timePart] = str.split('T');
+    if (!datePart) return str;
+    const [y, m, d] = datePart.split('-');
+    return `${d}-${m}-${y} ${timePart || '00:00'}`;
+}
+
+function parseDisplayDate(str) {
+    // Parses "DD/MM/YY HH:MM" or "DD-MM-YYYY HH:MM" -> Date object
+    if (!str || str === '–' || str === '-') return null;
+    let m;
+    m = str.match(/^(\d{2})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})$/);
+    if (m) return new Date(`20${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`);
+    m = str.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
+    if (m) return new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`);
+    return null;
+}
+
+function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => { t.className = `toast ${type}`; }, 3000);
+}
+
+/* ================================================================
+   DUTY HOURS – LIVE CALCULATION + GRADIENT
+   ================================================================ */
+function minutesToHHMM(m) { return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`; }
+function getDutyClass(m) {
+    if (m >= 600) return 'dh-critical';
+    if (m >= 480) return 'dh-high';
+    if (m >= 360) return 'dh-mid';
+    if (m >= 240) return 'dh-low';
+    return 'dh-ok';
+}
+function updateDutyHours() {
+    const now = getISTNow();
+    document.querySelectorAll('.duty-cell[data-signon]').forEach(cell => {
+        const iso = cell.dataset.signon;
+        if (!iso) return;
+        const signOn = new Date(iso + '+05:30');
+        if (isNaN(signOn.getTime())) return;
+        const mins = Math.max(0, Math.floor((now - signOn) / 60000));
+        cell.textContent = minutesToHHMM(mins);
+        cell.classList.remove('dh-critical','dh-high','dh-mid','dh-low','dh-ok');
+        cell.classList.add(getDutyClass(mins));
+    });
+}
+updateDutyHours();
+setInterval(updateDutyHours, 30000);
+
+/* ================================================================
+   PER-FIELD DIRTY TRACKING
+   Tracks only the specific fields admin has changed.
+   Key: "crewId|||field", Value: getter function returning the value to save
+   ================================================================ */
+const dirtyFields = new Map(); // key -> getter fn
+
+function markFieldDirty(crewId, field, getter) {
+    const key = `${crewId}|||${field}`;
+    dirtyFields.set(key, getter);
+    // Visual indicator on the input
+}
+
+/* ================================================================
+   INITIALISE DATETIME-LOCAL INPUTS from server-rendered raw value
+   ================================================================ */
+document.querySelectorAll('.dt-input, .relief-dt-input').forEach(inp => {
+    const raw = inp.dataset.raw;
+    const dt = parseDisplayDate(raw);
+    if (dt && !isNaN(dt.getTime())) inp.value = toISOLocal(dt);
+
+    inp.addEventListener('change', () => {
+        inp.classList.add('field-dirty');
+        const crew = inp.dataset.crew;
+        const field = inp.dataset.field;
+        markFieldDirty(crew, field, () => fromDatetimeLocal(inp.value));
+    });
+});
+
+/* ================================================================
+   EDITABLE SPANS (loco, train, bpc)
+   ================================================================ */
+document.querySelectorAll('.editable').forEach(el => {
+    el.addEventListener('input', () => {
+        el.classList.add('field-dirty');
+        const crew = el.dataset.crew;
+        const field = el.dataset.field;
+        markFieldDirty(crew, field, () => el.textContent.trim().toUpperCase());
+    });
+    el.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+    });
+});
+
+/* ================================================================
+   STATION AUTOCOMPLETE (Location + Relief Station)
+   ================================================================ */
+let stationList = [];
+
+async function loadStations() {
+    try {
+        const r = await fetch('/api/stations');
+        stationList = await r.json();
+    } catch(e) { console.warn('Could not load stations:', e); }
+}
+loadStations();
+
+function buildAcDropdown(input, dropdown, onSelect) {
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toUpperCase();
+        if (q.length < 1) { dropdown.style.display = 'none'; return; }
+        const matches = stationList.filter(s =>
+            s.code.toUpperCase().startsWith(q) ||
+            (s.name || '').toUpperCase().includes(q)
+        ).slice(0, 12);
+        if (!matches.length) { dropdown.style.display = 'none'; return; }
+        dropdown.innerHTML = matches.map(s =>
+            `<div class="ac-item" data-code="${s.code}">
+                <span class="ac-code">${s.code}</span>
+                <span class="ac-name">${s.name || ''}</span>
+             </div>`
+        ).join('');
+        dropdown.style.display = 'block';
+        dropdown.querySelectorAll('.ac-item').forEach(item => {
+            item.addEventListener('mousedown', e => {
+                e.preventDefault();
+                onSelect(item.dataset.code);
+                dropdown.style.display = 'none';
             });
         });
-
-        // --- Auto-Save & Refresh Logic ---
-        const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-        let timeRemaining = REFRESH_INTERVAL_MS / 1000;
-        
-        function updateTimerUI() {
-            timeRemaining--;
-            if (timeRemaining <= 0) return;
-            const m = Math.floor(timeRemaining / 60);
-            const s = timeRemaining % 60;
-            document.getElementById('refreshTimerText').textContent = `Next auto-refresh in ${m}:${s.toString().padStart(2, '0')}`;
+    });
+    input.addEventListener('blur', () => {
+        setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+    });
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Escape') dropdown.style.display = 'none';
+        if (e.key === 'Enter') {
+            const first = dropdown.querySelector('.ac-item');
+            if (first) { onSelect(first.dataset.code); dropdown.style.display = 'none'; e.preventDefault(); }
         }
-        setInterval(updateTimerUI, 1000);
+    });
+}
 
-        async function saveAndRefresh() {
-            document.getElementById('saveStatus').classList.remove('hidden');
-            
-            const payload = {};
-            document.querySelectorAll('.ns-checkbox').forEach(cb => {
-                payload[cb.dataset.crew] = cb.checked ? 'yes' : 'no';
-            });
+// Location autocomplete (main table)
+document.querySelectorAll('.ac-input').forEach(input => {
+    const dropdown = input.nextElementSibling;
+    const crew = input.dataset.crew;
+    const field = input.dataset.field;
+    buildAcDropdown(input, dropdown, code => {
+        input.value = code;
+        input.classList.add('field-dirty');
+        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+    });
+    input.addEventListener('input', () => {
+        input.classList.add('field-dirty');
+        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+    });
+});
 
-            try {
-                await fetch('/api/save_ns_status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            } catch (err) {
-                console.error("Save failed:", err);
+// Relief station autocomplete
+document.querySelectorAll('.relief-stn-input').forEach(input => {
+    const dropdown = input.nextElementSibling;
+    const crew = input.dataset.crew;
+    const field = input.dataset.field;
+    buildAcDropdown(input, dropdown, code => {
+        input.value = code;
+        input.classList.add('field-dirty');
+        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+    });
+    input.addEventListener('input', () => {
+        input.classList.add('field-dirty');
+        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+    });
+});
+
+/* ================================================================
+   RELIEF TOGGLE CHECKBOX
+   ================================================================ */
+document.querySelectorAll('.relief-toggle').forEach(cb => {
+    cb.addEventListener('change', function () {
+        const crewId = this.dataset.crew;
+        const wrap = this.closest('.relief-wrap');
+        const fields = wrap.querySelector('.relief-fields');
+        if (this.checked) {
+            fields.classList.remove('hidden-fields');
+            // Auto-populate datetime with current IST if empty
+            const dtInp = fields.querySelector('.relief-dt-input');
+            if (dtInp && !dtInp.value) {
+                dtInp.value = toISOLocal(getISTNow());
+                markFieldDirty(crewId, 'relief_datetime', () => fromDatetimeLocal(dtInp.value));
             }
-            
-            location.reload();
+        } else {
+            fields.classList.add('hidden-fields');
         }
+        const checked = this.checked;
+        markFieldDirty(crewId, 'is_relief', () => checked ? '1' : '0');
+    });
+});
 
-        setTimeout(saveAndRefresh, REFRESH_INTERVAL_MS);
+/* ================================================================
+   NS CHECKBOX
+   ================================================================ */
+document.querySelectorAll('.ns-checkbox').forEach(cb => {
+    cb.addEventListener('change', function () {
+        const tr = this.closest('tr');
+        const td = this.closest('td');
+        const isRelief = this.dataset.isRelief === '1';
+        if (this.checked) { tr.className = 'row-ns'; td.setAttribute('data-val','1'); }
+        else { tr.className = isRelief ? 'row-relief' : ''; td.setAttribute('data-val','0'); }
+    });
+});
 
-        // --- Table Sorting Logic ---
-        const getCellValue = (tr, idx) => tr.children[idx].innerText || tr.children[idx].textContent || tr.children[idx].getAttribute('data-val') || '';
-        const comparer = (idx, asc) => (a, b) => ((v1, v2) => 
-            v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? v1 - v2 : v1.toString().localeCompare(v2)
-        )(getCellValue(asc ? a : b, idx), getCellValue(asc ? b : a, idx));
+/* ================================================================
+   AUTO-SAVE + TIMER
+   ================================================================ */
+const SAVE_INTERVAL = 5 * 60 * 1000;
+let timeLeft = SAVE_INTERVAL / 1000;
 
-        document.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', (() => {
-            const table = th.closest('table');
-            const tbody = table.querySelector('tbody');
-            // Remove icon classes
-            table.querySelectorAll('th').forEach(th_o => { 
-                if (th_o !== th) { th_o.classList.remove('asc', 'desc'); }
+function updateTimer() {
+    timeLeft--;
+    if (timeLeft <= 0) return;
+    const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
+    document.getElementById('timerBadge').textContent = `Save in ${m}:${String(s).padStart(2,'0')}`;
+}
+setInterval(updateTimer, 1000);
+
+function showSaveStatus(text, type) {
+    const el = document.getElementById('saveStatus');
+    el.textContent = text; el.className = `save-status ${type}`;
+}
+
+async function saveAndRefresh(manual = false) {
+    showSaveStatus('Saving…', 'saving');
+
+    // NS status (always save all)
+    const nsPayload = {};
+    document.querySelectorAll('.ns-checkbox').forEach(cb => {
+        nsPayload[cb.dataset.crew] = cb.checked ? 'yes' : 'no';
+    });
+
+    // Only save fields that admin actually touched (per-field dirty set)
+    const editSaves = [];
+    for (const [key, getter] of dirtyFields.entries()) {
+        const [crewId, field] = key.split('|||');
+        const value = getter();
+        editSaves.push({ crew_id: crewId, field, value });
+    }
+
+    try {
+        await fetch('/api/save_ns_status', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nsPayload)
+        });
+        for (const edit of editSaves) {
+            await fetch('/api/admin_edit', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(edit)
             });
+        }
+        showSaveStatus('Saved ✓', 'saved');
+        if (manual) {
+            showToast(`Saved ${editSaves.length} field(s) successfully.`, 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            setTimeout(() => location.reload(), 600);
+        }
+    } catch(err) {
+        console.error('Save failed:', err);
+        showToast('Save failed. Will retry.', 'error');
+        showSaveStatus('Error', 'saving');
+    }
+}
 
-            // Toggle asc/desc
-            let asc = true;
-            if (th.classList.contains('asc')) {
-                th.classList.remove('asc');
-                th.classList.add('desc');
-                asc = false;
+setTimeout(saveAndRefresh, SAVE_INTERVAL);
+
+/* ================================================================
+   PHONE POPOVER
+   ================================================================ */
+let currentPhoneCrew = null;
+
+function openPhonePopover(evt, crewId) {
+    currentPhoneCrew = crewId;
+    const pop = document.getElementById('phonePopover');
+    document.getElementById('popoverTitle').textContent = `Add phone – ${crewId}`;
+    document.getElementById('popoverInput').value = '';
+    pop.classList.add('visible');
+    const btn = evt.currentTarget, rect = btn.getBoundingClientRect(), popW = 240;
+    let left = rect.left - popW - 8;
+    if (left < 8) left = rect.right + 8;
+    let top = rect.top - 10;
+    if (top + 140 > window.innerHeight) top = window.innerHeight - 150;
+    pop.style.left = left + 'px'; pop.style.top = top + 'px';
+    setTimeout(() => document.getElementById('popoverInput').focus(), 50);
+    evt.stopPropagation();
+}
+function closePhonePopover() {
+    document.getElementById('phonePopover').classList.remove('visible');
+    currentPhoneCrew = null;
+}
+document.addEventListener('click', e => {
+    const pop = document.getElementById('phonePopover');
+    if (pop.classList.contains('visible') && !pop.contains(e.target)) closePhonePopover();
+});
+async function submitPhone() {
+    const phone = document.getElementById('popoverInput').value.trim();
+    if (!phone || !currentPhoneCrew) return;
+    try {
+        const res = await fetch('/api/add_phone', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ crew_id: currentPhoneCrew, phone })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            const span = document.getElementById(`phone-${currentPhoneCrew}`);
+            if (span) {
+                const newLine = document.createElement('span');
+                newLine.className = 'phone-num-line';
+                newLine.textContent = phone;
+                // Remove placeholder dash if present
+                const dash = span.querySelector('span[style]');
+                if (dash) span.removeChild(dash);
+                span.appendChild(newLine);
+            }
+            showToast('Phone number added!', 'success');
+            closePhonePopover();
+        } else { showToast('Error saving.', 'error'); }
+    } catch { showToast('Network error.', 'error'); }
+}
+document.getElementById('popoverInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitPhone();
+    if (e.key === 'Escape') closePhonePopover();
+});
+
+/* ================================================================
+   TABLE SORTING
+   ================================================================ */
+const getCellText = (tr, idx) => {
+    const td = tr.children[idx]; if (!td) return '';
+    const duty = td.querySelector('.duty-cell');
+    if (duty && duty.dataset.signon) return duty.dataset.signon;
+    const inp = td.querySelector('input[type="text"], .ac-input');
+    if (inp) return inp.value;
+    const dt = td.querySelector('input[type="datetime-local"]');
+    if (dt) return dt.value;
+    const ed = td.querySelector('.editable');
+    if (ed) return ed.textContent;
+    return td.innerText || td.getAttribute('data-val') || '';
+};
+let sortCol = -1, sortAsc = true;
+document.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+        const idx = parseInt(th.dataset.col);
+        sortAsc = (sortCol === idx) ? !sortAsc : true;
+        sortCol = idx;
+        document.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc','sorted-desc'));
+        th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+        const tbody = document.getElementById('tableBody');
+        Array.from(tbody.querySelectorAll('tr:not(.empty-row)'))
+            .sort((a, b) => {
+                const va = getCellText(a, idx), vb = getCellText(b, idx);
+                const cmp = (!isNaN(va) && !isNaN(vb) && va !== '' && vb !== '') ? va - vb : va.localeCompare(vb);
+                return sortAsc ? cmp : -cmp;
+            })
+            .forEach(tr => tbody.appendChild(tr));
+    });
+});
+
+/* ================================================================
+   SEARCH
+   ================================================================ */
+document.getElementById('searchInput').addEventListener('input', function () {
+    const f = this.value.toLowerCase();
+    document.querySelectorAll('#tableBody tr').forEach(row => {
+        if (row.classList.contains('empty-row')) return;
+        row.style.display = row.innerText.toLowerCase().includes(f) ? '' : 'none';
+    });
+});
+
+/* ================================================================
+   EXPORT CSV
+   ================================================================ */
+function exportTableToCSV(filename) {
+    const csv = [];
+    document.querySelectorAll('#crewTable tr').forEach(row => {
+        if (row.style.display === 'none' || row.classList.contains('empty-row')) return;
+        const rowData = [];
+        Array.from(row.querySelectorAll('td, th')).forEach((td, ci) => {
+            if (ci === 15) {
+                const inp = td.querySelector('input[type="checkbox"]');
+                rowData.push(inp ? (inp.checked ? 'Yes' : 'No') : 'NS');
+            } else if (ci === 11 || ci === 12) {
+                const dtInp = td.querySelector('input[type="datetime-local"]');
+                rowData.push(`"${dtInp ? fromDatetimeLocal(dtInp.value) : td.innerText.trim()}"`);
             } else {
-                th.classList.remove('desc');
-                th.classList.add('asc');
+                rowData.push(`"${td.innerText.replace(/[\r\n]+/g,' ').replace(/"/g,'""')}"`);
             }
-
-            Array.from(tbody.querySelectorAll('tr'))
-                .sort(comparer(Array.from(th.parentNode.children).indexOf(th), asc))
-                .forEach(tr => tbody.appendChild(tr));
-        })));
-
-        // --- Search Functionality ---
-        document.getElementById('searchInput').addEventListener('keyup', function() {
-            let filter = this.value.toLowerCase();
-            let rows = document.querySelectorAll('#tableBody tr');
-            rows.forEach(row => {
-                if (row.querySelector('td[colspan]')) return; // skip empty message row
-                let text = row.innerText.toLowerCase();
-                row.style.display = text.includes(filter) ? '' : 'none';
-            });
         });
-
-        // --- Export CSV ---
-        function exportTableToCSV(filename) {
-            let csv = [];
-            let rows = document.querySelectorAll("table tr");
-            
-            for (let i = 0; i < rows.length; i++) {
-                if (rows[i].style.display === 'none' || rows[i].querySelector('td[colspan]')) continue;
-                
-                let row = [], cols = rows[i].querySelectorAll("td, th");
-                for (let j = 0; j < cols.length; j++) {
-                    // avoid checkbox HTML
-                    if(j === 13) {
-                        row.push(cols[j].querySelector('input') ? (cols[j].querySelector('input').checked ? 'Yes' : 'No') : 'Found in NS?');
-                        continue;
-                    }
-                    let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/"/g, '""');
-                    row.push('"' + data + '"');
-                }
-                csv.push(row.join(","));
-            }
-
-            let csvFile = new Blob([csv.join("\n")], {type: "text/csv"});
-            let downloadLink = document.createElement("a");
-            downloadLink.download = filename;
-            downloadLink.href = window.URL.createObjectURL(csvFile);
-            downloadLink.style.display = "none";
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
-        }
-    </script>
+        csv.push(rowData.join(','));
+    });
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = URL.createObjectURL(new Blob([csv.join('\n')], { type: 'text/csv' }));
+    link.click();
+}
+</script>
 </body>
 </html>

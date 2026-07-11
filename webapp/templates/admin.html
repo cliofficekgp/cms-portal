@@ -42,6 +42,18 @@
                 
                 <p class="text-sm text-gray-600">{{ state.message }}</p>
                 <p class="text-xs text-gray-400 mt-2">Last updated: {{ state.last_updated }}</p>
+                
+                <div class="mt-4 pt-4 border-t flex space-x-3">
+                    {% if state.status in ['running', 'sleeping', 'starting', 'waiting_for_captcha', 'waiting_for_otp'] %}
+                    <form action="/admin/scraper/cancel" method="POST">
+                        <button type="submit" class="bg-red-500 text-white px-4 py-2 rounded shadow text-sm font-medium hover:bg-red-600 transition-colors">Stop Scraper</button>
+                    </form>
+                    {% else %}
+                    <form action="/admin/scraper/trigger" method="POST">
+                        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded shadow text-sm font-medium hover:bg-indigo-700 transition-colors">Start Scraper</button>
+                    </form>
+                    {% endif %}
+                </div>
             </div>
 
             {% if state.action_required %}

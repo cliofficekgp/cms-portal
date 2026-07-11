@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 import secrets
 import string
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
 
 app = Flask(__name__)
 
@@ -53,15 +53,35 @@ scraper_state = {
 def run_scraper_thread():
     scraper_script = os.path.join(BASE_DIR, 'scraper', 'login.py')
     python_exe = sys.executable
+    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
+    fatal_file = os.path.join(BASE_DIR, 'data', 'fatal_error.txt')
+    
+    global scraper_process
+    scraper_process = None
+
     while True:
         try:
+            if os.path.exists(stop_file) or os.path.exists(fatal_file):
+                import time
+                time.sleep(2)
+                continue
+
             print("[Thread] Starting scraper subprocess...")
             scraper_state['status'] = 'running'
             scraper_state['message'] = 'Scraper subprocess starting...'
-            subprocess.run([python_exe, scraper_script], cwd=os.path.join(BASE_DIR, 'scraper'))
-            print("[Thread] Scraper subprocess exited. Restarting in 30 seconds...")
-            import time
-            time.sleep(30)
+            scraper_process = subprocess.Popen([python_exe, scraper_script], cwd=os.path.join(BASE_DIR, 'scraper'))
+            
+            scraper_process.wait()
+            scraper_process = None
+
+            # Only sleep 30s and restart if it wasn't intentionally stopped
+            if not os.path.exists(stop_file) and not os.path.exists(fatal_file):
+                print("[Thread] Scraper subprocess exited. Restarting in 30 seconds...")
+                import time
+                for _ in range(15): # Check for stop condition during the 30s sleep
+                    if os.path.exists(stop_file) or os.path.exists(fatal_file):
+                        break
+                    time.sleep(2)
         except Exception as e:
             print(f"[Thread] Scraper thread exception: {e}")
             import time
@@ -196,6 +216,16 @@ def init_db():
             ordering_time TEXT,
             mobile_number TEXT,
             fetched_at    TEXT
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS admin_edits (
+            crew_id     TEXT NOT NULL,
+            field       TEXT NOT NULL,
+            value       TEXT,
+            updated_at  TEXT,
+            PRIMARY KEY (crew_id, field)
         )
     ''')
 
@@ -680,9 +710,15 @@ def admin_settings():
         cms_user = request.form.get('cms_username', '').strip()
         cms_pass = request.form.get('cms_password', '').strip()
         if cms_user and cms_pass:
-            conn.execute('UPDATE cms_settings SET cms_username = ?, cms_password = ? WHERE id = 1', (cms_user, cms_pass))
-            conn.commit()
+            try:
+                conn.execute('UPDATE cms_settings SET cms_username = ?, cms_password = ? WHERE id = 1', (cms_user, cms_pass))
+                conn.commit()
+                flash('Settings saved successfully.', 'success')
+            except Exception as e:
+                flash(f'Failed to save settings: {str(e)}', 'error')
             return redirect(url_for('admin_settings'))
+        else:
+            flash('Both username and password are required.', 'error')
     row = conn.execute('SELECT cms_username, cms_password FROM cms_settings WHERE id = 1').fetchone()
     conn.close()
     return render_template('admin_settings.html', settings=row)
@@ -730,6 +766,33 @@ def admin_submit_action():
         scraper_state['action_required'] = False
         scraper_state['message'] = 'Action submitted. Waiting for scraper to process...'
         scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return redirect(url_for('admin'))
+
+@app.route('/admin/scraper/trigger', methods=['POST'])
+@login_required
+def scraper_trigger():
+    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
+    fatal_file = os.path.join(BASE_DIR, 'data', 'fatal_error.txt')
+    if os.path.exists(stop_file):
+        os.remove(stop_file)
+    if os.path.exists(fatal_file):
+        os.remove(fatal_file)
+        
+    scraper_state['status'] = 'starting'
+    scraper_state['message'] = 'Manual trigger initiated...'
+    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return redirect(url_for('admin'))
+
+@app.route('/admin/scraper/cancel', methods=['POST'])
+@login_required
+def scraper_cancel():
+    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
+    with open(stop_file, 'w') as f:
+        f.write('stop')
+        
+    scraper_state['status'] = 'cancelled'
+    scraper_state['message'] = 'Stopping scraper gracefully...'
+    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return redirect(url_for('admin'))
 
 @app.route('/api/scraper/state', methods=['POST'])
@@ -856,16 +919,27 @@ def crew_list():
     '''
     
     rows = conn.execute(query).fetchall()
+
+    # Load all admin_edits for efficient lookup
+    admin_edit_rows = conn.execute('SELECT crew_id, field, value FROM admin_edits').fetchall()
+    admin_edits_map = {}
+    for ae in admin_edit_rows:
+        admin_edits_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['value']
+
     conn.close()
     
     data = [dict(row) for row in rows]
     
     now = datetime.now(IST)
+
+    # Fields tracked for source attribution
+    EDITABLE_FIELDS = ['loco_no', 'train_no', 'bpc_no', 'current_location', 'cto_time',
+                       'is_relief', 'relief_station', 'relief_datetime']
     
     def parse_dt(val):
         if not val or val == '-': return None
         val = val.strip()
-        for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%Y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
+        for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M', '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
             try:
                 dt = datetime.strptime(val, fmt)
                 return dt.replace(tzinfo=IST)
@@ -874,15 +948,82 @@ def crew_list():
         return None
 
     for row in data:
-        # Calculate Duty Hours
+        crew_id = row.get('crew_id', '')
+        crew_admin_edits = admin_edits_map.get(crew_id, {})
+
+        # --- Determine data source for each editable field ---
+        # Source priority: admin > crew submission > cms record
+        # We re-fetch from the raw query: loco_no, train_no come from COALESCE(s.loco_no, r.loco_no)
+        # We need to detect which source actually filled the value
+        #
+        # Strategy: track source per field
+        src = {}
+
+        for field in ['loco_no', 'train_no']:
+            # Both CMS and submission may have this
+            if field in crew_admin_edits and crew_admin_edits[field] is not None:
+                src[field] = 'admin'
+                row[field] = crew_admin_edits[field]
+            elif row.get(field):  # COALESCE already picked best, but we can detect
+                # If submission has it, it takes priority in COALESCE already
+                src[field] = 'sub'  # default to sub (conservative)
+            else:
+                src[field] = 'cms'
+
+        for field in ['bpc_no', 'cto_time']:
+            if field in crew_admin_edits and crew_admin_edits[field] is not None:
+                src[field] = 'admin'
+                row[field] = crew_admin_edits[field]
+            elif row.get(field):
+                src[field] = 'sub'
+            else:
+                src[field] = 'none'
+
+        if 'current_location' in crew_admin_edits and crew_admin_edits['current_location'] is not None:
+            src['current_location'] = 'admin'
+            row['current_location'] = crew_admin_edits['current_location']
+        elif row.get('current_location'):
+            src['current_location'] = 'sub'
+        else:
+            row['current_location'] = row.get('from_sttn')
+            src['current_location'] = 'cms'
+
+        for field in ['relief_station', 'relief_datetime']:
+            if field in crew_admin_edits and crew_admin_edits[field] is not None:
+                src[field] = 'admin'
+                row[field] = crew_admin_edits[field]
+            elif row.get(field):
+                src[field] = 'sub'
+            else:
+                src[field] = 'none'
+
+        # Relief flag admin override
+        if 'is_relief' in crew_admin_edits:
+            try:
+                row['is_relief'] = int(crew_admin_edits['is_relief'])
+                src['is_relief'] = 'admin'
+            except:
+                src['is_relief'] = 'sub'
+        else:
+            src['is_relief'] = 'sub' if row.get('is_relief') else 'none'
+
+        row['_src'] = src
+
+        # Calculate Duty Hours (raw minutes stored for gradient sorting)
         sign_on_dt = None
         if row.get('sign_on_time') and row['sign_on_time'] != '-':
             sign_on_dt = parse_dt(row['sign_on_time'])
             if sign_on_dt:
                 delta = now - sign_on_dt
-                hours = int(delta.total_seconds() // 3600)
-                minutes = int((delta.total_seconds() % 3600) // 60)
+                total_minutes = int(delta.total_seconds() // 60)
+                hours = total_minutes // 60
+                minutes = total_minutes % 60
                 row['duty_hrs'] = f"{hours:02d}:{minutes:02d}"
+                row['_duty_minutes'] = total_minutes  # for gradient
+            else:
+                row['_duty_minutes'] = 0
+        else:
+            row['_duty_minutes'] = 0
 
         # Calculate PDD
         row['pdd'] = '-'
@@ -904,6 +1045,18 @@ def crew_list():
         # Capture raw datetimes for sorting BEFORE display formatting overwrites the strings
         row['_sign_on_dt'] = sign_on_dt if sign_on_dt else datetime.min.replace(tzinfo=IST)
         row['_cto_dt'] = parse_dt(row.get('cto_time')) or datetime.min.replace(tzinfo=IST)
+
+        # Store ISO sign_on for JS live duty calc
+        row['_sign_on_iso'] = sign_on_dt.strftime('%Y-%m-%dT%H:%M:%S') if sign_on_dt else ''
+
+        # Filter ordering time: must be within 2 hours of sign on time
+        if sign_on_dt and row.get('ordering_time') and row['ordering_time'] != '-':
+            ord_dt = parse_dt(row['ordering_time'])
+            if ord_dt:
+                if abs((sign_on_dt - ord_dt).total_seconds()) > 7200:
+                    row['ordering_time'] = '-'
+            else:
+                row['ordering_time'] = '-'
 
         # Format dates universally (DD/MM/YY HH:MM) — happens AFTER capturing sort keys above
         for col in ['sign_on_time', 'cto_time', 'relief_datetime', 'departure_time']:
@@ -935,6 +1088,70 @@ def save_ns_status():
     conn = get_db()
     for crew_id, status in payload.items():
         conn.execute('UPDATE crew_records SET found_in_ns = ? WHERE crew_id = ?', (status, crew_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/admin_edit', methods=['POST'])
+@login_required
+def api_admin_edit():
+    """Save an admin override for a specific field of a crew record."""
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'status': 'error', 'message': 'No data'}), 400
+
+    crew_id = payload.get('crew_id', '').strip().upper()
+    field   = payload.get('field', '').strip()
+    value   = payload.get('value', '').strip()
+
+    ALLOWED_FIELDS = {'loco_no', 'train_no', 'bpc_no', 'current_location',
+                      'cto_time', 'is_relief', 'relief_station', 'relief_datetime'}
+    if not crew_id or field not in ALLOWED_FIELDS:
+        return jsonify({'status': 'error', 'message': 'Invalid field or crew_id'}), 400
+
+    updated_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+    conn = get_db()
+    conn.execute('''
+        INSERT INTO admin_edits (crew_id, field, value, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+    ''', (crew_id, field, value, updated_at))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/add_phone', methods=['POST'])
+@login_required
+def api_add_phone():
+    """Append a phone number (comma-separated) to a crew's mobile_number in booking_ta_crew."""
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'status': 'error', 'message': 'No data'}), 400
+
+    crew_id = payload.get('crew_id', '').strip().upper()
+    phone   = payload.get('phone', '').strip()
+
+    if not crew_id or not phone:
+        return jsonify({'status': 'error', 'message': 'crew_id and phone required'}), 400
+
+    conn = get_db()
+    existing = conn.execute('SELECT mobile_number FROM booking_ta_crew WHERE crew_id = ?', (crew_id,)).fetchone()
+    fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+
+    if existing:
+        current = existing['mobile_number'] or ''
+        numbers = [n.strip() for n in current.split(',') if n.strip()]
+        if phone not in numbers:
+            numbers.append(phone)
+        new_value = ', '.join(numbers)
+        conn.execute('UPDATE booking_ta_crew SET mobile_number = ?, fetched_at = ? WHERE crew_id = ?',
+                     (new_value, fetched_at, crew_id))
+    else:
+        conn.execute('INSERT INTO booking_ta_crew (crew_id, mobile_number, fetched_at) VALUES (?, ?, ?)',
+                     (crew_id, phone, fetched_at))
+
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})

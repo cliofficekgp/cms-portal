@@ -11,19 +11,38 @@ from PIL import Image
 from google.cloud import vision
 
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Human-like timing helpers
 # -----------------------------------------------------------------------------
+import sys
+
+def check_stop_signal():
+    stop_file = os.path.join(DATA_DIR, 'stop.txt')
+    return os.path.exists(stop_file)
+
+def interruptible_sleep(sleep_seconds):
+    """Sleeps for sleep_seconds, but checks for stop signal every second."""
+    for _ in range(int(sleep_seconds)):
+        if check_stop_signal():
+            return True # Interrupted
+        time.sleep(1)
+    if sleep_seconds > int(sleep_seconds):
+        time.sleep(sleep_seconds - int(sleep_seconds))
+    return check_stop_signal()
 
 def human_delay(min_s, max_s):
-    """Sleep a random amount between min_s and max_s seconds."""
-    time.sleep(random.uniform(min_s, max_s))
+    """Sleep a random amount between min_s and max_s seconds, interruptible."""
+    return interruptible_sleep(random.uniform(min_s, max_s))
 
 def human_type(element, text, min_delay=0.06, max_delay=0.18):
     """Type text character-by-character with small random delays,
     like a real person typing rather than Selenium's instant send_keys."""
     for ch in text:
+        if check_stop_signal():
+            return True
         element.send_keys(ch)
         time.sleep(random.uniform(min_delay, max_delay))
+    return False
 
 def random_cycle_sleep_seconds(min_minutes=25, max_minutes=35):
     """Random sleep between min_minutes and max_minutes, in seconds."""
@@ -273,9 +292,14 @@ def sync_ta_reports(session_obj):
 
 def main_loop():
     consecutive_captcha_failures = 0
+    consecutive_auth_failures = 0
     client = vision.ImageAnnotatorClient()
     
     while True:
+        if check_stop_signal():
+            print("Stop signal detected. Exiting scraper process gracefully.")
+            sys.exit(0)
+            
         try:
             send_state_to_admin('starting', 'Checking saved cookies...')
             # 1. Try saved cookies
@@ -316,7 +340,8 @@ def main_loop():
                 sleep_seconds = random_cycle_sleep_seconds(25, 35)
                 sleep_minutes = sleep_seconds / 60
                 send_state_to_admin('sleeping', f'Sync successful. Sleeping for {sleep_minutes:.1f} minutes...')
-                time.sleep(sleep_seconds)
+                if interruptible_sleep(sleep_seconds):
+                    sys.exit(0)
                 continue
                 
             # 2. Login Flow (Headless)
@@ -369,9 +394,9 @@ def main_loop():
             # Handle Session Expire
             if "LOCAL COMPUTER WAS NOT USED" in driver.page_source or "Session Expire Page" in driver.title:
                 try:
-                    human_delay(0.8, 2.0)  # brief pause before reacting, like a person noticing the page
+                    if human_delay(0.8, 2.0): sys.exit(0)
                     driver.execute_script("if (typeof load === 'function') { load(); } else { document.reportLoginForm.submit(); }")
-                    human_delay(2.5, 4.5)
+                    if human_delay(2.5, 4.5): sys.exit(0)
                     handle_alert(driver)
                 except Exception:
                     pass
@@ -427,21 +452,21 @@ def main_loop():
             # Login
             try:
                 user_field = driver.find_element(By.ID, "User-Id")
-                human_delay(0.4, 1.1)  # pause before clicking into the field, like locating it visually
+                if human_delay(0.4, 1.1): sys.exit(0)
                 user_field.click()
-                human_type(user_field, cms_user)
+                if human_type(user_field, cms_user): sys.exit(0)
 
-                human_delay(0.3, 0.9)  # pause moving to next field
+                if human_delay(0.3, 0.9): sys.exit(0)
                 pass_field = driver.find_element(By.ID, "user-Password")
                 pass_field.click()
-                human_type(pass_field, cms_pass)
+                if human_type(pass_field, cms_pass): sys.exit(0)
 
-                human_delay(0.4, 1.0)  # pause before reading/typing captcha, like a person glancing at the image
+                if human_delay(0.4, 1.0): sys.exit(0)
                 captcha_field = driver.find_element(By.ID, "jcaptcha")
                 captcha_field.click()
-                human_type(captcha_field, result)
+                if human_type(captcha_field, result): sys.exit(0)
 
-                human_delay(0.5, 1.3)  # brief pause before hitting submit
+                if human_delay(0.5, 1.3): sys.exit(0)
                 login_form = driver.find_element(By.ID, "loginForm")
                 submit_buttons = login_form.find_elements(By.XPATH, ".//input[@type='submit' or @type='button']")
                 if submit_buttons: submit_buttons[0].click()
@@ -450,13 +475,49 @@ def main_loop():
                 driver.quit()
                 continue
                 
-            human_delay(2.5, 4.5)
+            if human_delay(2.5, 4.5): sys.exit(0)
             handle_alert(driver)
             
             # Check Result
             source = driver.page_source
-            if "Oops!" in source or "Error Code" in source:
+            
+            # Look for specific error messages
+            error_text = ""
+            try:
+                error_div = driver.find_element(By.XPATH, "/html/body/section/div/div[2]/div[3]/div")
+                error_text = error_div.text.strip()
+            except:
+                pass
+
+            if "User Id/Password Does Not Match" in error_text or "User Id/Password Does Not Match" in source:
+                consecutive_auth_failures += 1
+                if consecutive_auth_failures >= 2:
+                    # Write fatal error to stop restarts
+                    with open(os.path.join(DATA_DIR, 'fatal_error.txt'), 'w') as f:
+                        f.write('auth_error')
+                    send_state_to_admin('error', 'User Id/Password Does Not Match. Please update in CMS Settings and trigger manually.')
+                    driver.quit()
+                    sys.exit(1)
+                else:
+                    driver.quit()
+                    continue
+                    
+            if "Please Enter Valid Captcha!" in error_text or "Please Enter Valid Captcha!" in source:
+                consecutive_captcha_failures += 1
                 driver.quit()
+                continue
+
+            if error_text and "Oops!" not in error_text and "Error Code" not in error_text:
+                # Other specific error shown in the UI
+                send_state_to_admin('error', f'Login Error: {error_text}')
+                driver.quit()
+                interruptible_sleep(10)
+                continue
+
+            if "Oops!" in source or "Error Code" in source:
+                send_state_to_admin('error', 'CMS returned Oops! or Error Code. Retrying soon...')
+                driver.quit()
+                interruptible_sleep(30)
                 continue
             
             otp_detected = False
@@ -469,12 +530,14 @@ def main_loop():
                 if "MapHRMS" in source or "SKIP" in source or "MISC" in source:
                     # Bypassed OTP
                     consecutive_captcha_failures = 0
+                    consecutive_auth_failures = 0
                 else:
                     consecutive_captcha_failures += 1
                     driver.quit()
                     continue
             else:
                 consecutive_captcha_failures = 0
+                consecutive_auth_failures = 0
                 
                 otp_val = None
                 OTP_FILE = os.path.join(DATA_DIR, 'otp.txt')
@@ -499,16 +562,16 @@ def main_loop():
                 for inp in otp_inputs:
                     inp.send_keys(Keys.BACKSPACE)
                     inp.clear()
-                human_delay(0.5, 1.2)  # brief pause before keying in the OTP digits
+                if human_delay(0.5, 1.2): sys.exit(0)
                 for i, digit in enumerate(otp_val):
                     if i < len(otp_inputs):
                         otp_inputs[i].send_keys(digit)
-                        human_delay(0.15, 0.45)  # gap between each OTP digit, like typing one box at a time
+                        if human_delay(0.15, 0.45): sys.exit(0)
 
-                human_delay(0.4, 1.0)  # pause before clicking verify
+                if human_delay(0.4, 1.0): sys.exit(0)
                 verify_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Verify') or contains(@onclick, 'verifyOTP')]")
                 verify_btn.click()
-                human_delay(2.5, 4.5)
+                if human_delay(2.5, 4.5): sys.exit(0)
                 handle_alert(driver)
                 
                 source = driver.page_source
@@ -524,9 +587,9 @@ def main_loop():
                 skip_button = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//input[@value='SKIP' or @value='Skip'] | //input[contains(@onclick, 'SKIP')] | //input[@name='hmode' and @value='SKIP']"))
                 )
-                human_delay(0.6, 1.6)  # pause before clicking, as if reading the page first
+                if human_delay(0.6, 1.6): sys.exit(0)
                 driver.execute_script("arguments[0].click();", skip_button)
-                human_delay(2.5, 4.0)
+                if human_delay(2.5, 4.0): sys.exit(0)
             except:
                 pass
 
@@ -554,16 +617,19 @@ def main_loop():
                 sleep_minutes = sleep_seconds / 60
                 send_state_to_admin('sleeping', f'Sync successful. Sleeping for {sleep_minutes:.1f} minutes...')
                 driver.quit()
-                time.sleep(sleep_seconds)
+                if interruptible_sleep(sleep_seconds):
+                    sys.exit(0)
             else:
                 driver.quit()
 
         except Exception as e:
             traceback.print_exc()
-            send_state_to_admin('error', f'Exception: {e}')
+            error_msg = f'Code Error: {type(e).__name__} - {str(e)}'
+            send_state_to_admin('error', error_msg)
             try: driver.quit()
             except: pass
-            time.sleep(60)
+            if interruptible_sleep(60):
+                sys.exit(0)
 
 if __name__ == '__main__':
     main_loop()
