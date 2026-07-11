@@ -284,8 +284,8 @@ def main_loop():
             if USE_PROXY:
                 proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
                 session.proxies = {
-                    'http': 'socks5h://{proxy_host}:1080',
-                    'https': 'socks5h://{proxy_host}:1080',
+                    'http': f'socks5h://{proxy_host}:1080',
+                    'https': f'socks5h://{proxy_host}:1080',
                 }
             if os.path.exists(COOKIES_FILE):
                 with open(COOKIES_FILE, 'r') as cf:
@@ -538,9 +538,10 @@ def main_loop():
             # Sync
             session = requests.Session()
             if USE_PROXY:
+                proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
                 session.proxies = {
-                    'http': 'socks5h://127.0.0.1:1080',
-                    'https': 'socks5h://127.0.0.1:1080',
+                    'http': f'socks5h://{proxy_host}:1080',
+                    'https': f'socks5h://{proxy_host}:1080',
                 }
             for cookie in new_cookies:
                 session.cookies.set(cookie['name'], cookie['value'])
