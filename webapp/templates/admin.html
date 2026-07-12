@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <meta http-equiv="refresh" content="10">
 </head>
+
 <body class="bg-slate-50 min-h-screen">
     <nav class="bg-indigo-600 text-white shadow-md">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -16,12 +18,18 @@
                 </div>
                 <div class="flex items-center space-x-4">
                     <span class="text-sm text-indigo-200 hidden sm:block">👤 {{ session.get('username', '') }}</span>
-                    <a href="/crew_list" class="text-sm font-medium bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg transition-colors">Crew List</a>
-                    <a href="/admin/settings" class="text-sm font-medium hover:text-indigo-200 transition-colors">CMS Settings</a>
-                    <a href="/admin/reports" class="text-sm font-medium hover:text-indigo-200 transition-colors">Reports</a>
-                    {% if session.get('role') == 'super_admin' %}<a href="/super_admin" class="text-sm font-medium hover:text-indigo-200 transition-colors">Super Admin</a>{% endif %}
+                    <a href="/crew_list"
+                        class="text-sm font-medium bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg transition-colors">Crew
+                        List</a>
+                    <a href="/admin/settings" class="text-sm font-medium hover:text-indigo-200 transition-colors">CMS
+                        Settings</a>
+                    <a href="/admin/reports"
+                        class="text-sm font-medium hover:text-indigo-200 transition-colors">Reports</a>
+                    {% if session.get('role') == 'super_admin' %}<a href="/super_admin"
+                        class="text-sm font-medium hover:text-indigo-200 transition-colors">Super Admin</a>{% endif %}
                     <a href="/" class="text-sm font-medium hover:text-indigo-200 transition-colors">Home</a>
-                    <a href="/admin/logout" class="text-sm font-medium bg-red-500/30 hover:bg-red-500/50 text-white px-3 py-2 rounded-lg transition-colors">Logout</a>
+                    <a href="/admin/logout"
+                        class="text-sm font-medium bg-red-500/30 hover:bg-red-500/50 text-white px-3 py-2 rounded-lg transition-colors">Logout</a>
                 </div>
             </div>
         </div>
@@ -30,27 +38,68 @@
     <main class="max-w-4xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
         <div class="bg-white shadow rounded-lg p-6">
             <h2 class="text-2xl font-bold mb-4 text-gray-800">Background Scraper Status</h2>
-            
+
             <div class="mb-6 p-4 rounded-md border
                 {% if state.status == 'running' %}bg-green-50 border-green-200
                 {% elif state.status == 'waiting_for_captcha' or state.status == 'waiting_for_otp' %}bg-yellow-50 border-yellow-200
                 {% elif state.status == 'error' %}bg-red-50 border-red-200
                 {% else %}bg-gray-50 border-gray-200{% endif %}">
-                
+
                 <p class="text-sm text-gray-500 mb-1">Current State:</p>
-                <p class="text-lg font-semibold capitalize text-gray-900 mb-2">{{ state.status | replace('_', ' ') }}</p>
-                
+                <p class="text-lg font-semibold capitalize text-gray-900 mb-2">{{ state.status | replace('_', ' ') }}
+                </p>
+
                 <p class="text-sm text-gray-600">{{ state.message }}</p>
                 <p class="text-xs text-gray-400 mt-2">Last updated: {{ state.last_updated }}</p>
-                
-                <div class="mt-4 pt-4 border-t flex space-x-3">
-                    {% if state.status in ['running', 'sleeping', 'starting', 'waiting_for_captcha', 'waiting_for_otp'] %}
+
+                {% if state.last_run %}
+                <div
+                    class="mt-2 inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-medium px-2.5 py-1 rounded-full">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Last CMS Sync: {{ state.last_run }}
+                </div>
+                {% endif %}
+
+                <div class="mt-4 pt-4 border-t flex flex-wrap gap-3">
+                    {% if state.status in ['running', 'sleeping', 'starting', 'waiting_for_captcha', 'waiting_for_otp']
+                    %}
+
+                    {% if state.status == 'sleeping' %}
+                    <form action="/admin/scraper/run_now" method="POST">
+                        <button type="submit"
+                            class="inline-flex items-center gap-2 bg-emerald-500 text-white px-4 py-2 rounded shadow text-sm font-medium hover:bg-emerald-600 transition-colors"
+                            title="Wake up the scraper immediately and start a new sync cycle">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Run Now
+                        </button>
+                    </form>
+                    {% endif %}
+
                     <form action="/admin/scraper/cancel" method="POST">
-                        <button type="submit" class="bg-red-500 text-white px-4 py-2 rounded shadow text-sm font-medium hover:bg-red-600 transition-colors">Stop Scraper</button>
+                        <button type="submit"
+                            class="bg-red-500 text-white px-4 py-2 rounded shadow text-sm font-medium hover:bg-red-600 transition-colors">Stop
+                            Scraper</button>
                     </form>
                     {% else %}
-                    <form action="/admin/scraper/trigger" method="POST">
-                        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded shadow text-sm font-medium hover:bg-indigo-700 transition-colors">Start Scraper</button>
+                    <form action="/admin/scraper/run_now" method="POST">
+                        <button type="submit"
+                            class="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded shadow text-sm font-medium hover:bg-indigo-700 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Start Scraper
+                        </button>
                     </form>
                     {% endif %}
                 </div>
@@ -59,25 +108,34 @@
             {% if state.action_required %}
             <div class="border-t pt-6">
                 <h3 class="text-lg font-medium text-red-600 mb-4 flex items-center">
-                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                        </path>
+                    </svg>
                     Human Intervention Required
                 </h3>
 
                 <form action="/admin/submit_action" method="POST" class="bg-gray-50 p-6 rounded-lg border">
                     {% if state.action_type == 'captcha' and state.image_base64 %}
-                        <div class="mb-4">
-                            <p class="block text-sm font-medium text-gray-700 mb-2">Please solve the following captcha:</p>
-                            <img src="data:image/png;base64,{{ state.image_base64 }}" alt="Captcha" class="border rounded bg-white p-2 mb-2">
-                        </div>
+                    <div class="mb-4">
+                        <p class="block text-sm font-medium text-gray-700 mb-2">Please solve the following captcha:</p>
+                        <img src="data:image/png;base64,{{ state.image_base64 }}" alt="Captcha"
+                            class="border rounded bg-white p-2 mb-2">
+                    </div>
                     {% elif state.action_type == 'otp' %}
-                        <div class="mb-4">
-                            <p class="block text-sm font-medium text-gray-700 mb-2">Please enter the OTP sent to your registered mobile number:</p>
-                        </div>
+                    <div class="mb-4">
+                        <p class="block text-sm font-medium text-gray-700 mb-2">Please enter today's CMS login OTP sent
+                            to your registered mobile number:</p>
+                    </div>
                     {% endif %}
-                    
+
                     <div class="flex items-center space-x-4">
-                        <input type="text" name="action_value" required autocomplete="off" class="flex-1 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md p-2 border" placeholder="Enter value here...">
-                        <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        <input type="text" name="action_value" required autocomplete="off"
+                            class="flex-1 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md p-2 border"
+                            placeholder="Enter value here...">
+                        <button type="submit"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                             Submit
                         </button>
                     </div>
@@ -87,4 +145,5 @@
         </div>
     </main>
 </body>
+
 </html>

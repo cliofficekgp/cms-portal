@@ -43,7 +43,8 @@ scraper_state = {
     'action_required': False,
     'action_type': '', # 'captcha' or 'otp'
     'submitted_value': None,
-    'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST'),
+    'last_run': None  # Timestamp of the last successful CMS sync
 }
 
 # ---------------------------------------------------------------------------
@@ -795,6 +796,29 @@ def scraper_cancel():
     scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return redirect(url_for('admin'))
 
+@app.route('/admin/scraper/run_now', methods=['POST'])
+@login_required
+def scraper_run_now():
+    """Wake up a sleeping scraper immediately to start a new sync cycle."""
+    run_now_file = os.path.join(BASE_DIR, 'data', 'run_now.txt')
+    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
+    fatal_file = os.path.join(BASE_DIR, 'data', 'fatal_error.txt')
+
+    # If scraper was hard-stopped, clear that first so the thread can restart it
+    if os.path.exists(stop_file):
+        os.remove(stop_file)
+    if os.path.exists(fatal_file):
+        os.remove(fatal_file)
+
+    # Write the run-now signal; the scraper's interruptible_sleep will detect it
+    with open(run_now_file, 'w') as f:
+        f.write('run')
+
+    scraper_state['status'] = 'starting'
+    scraper_state['message'] = 'Manual run triggered — waking scraper...'
+    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return redirect(url_for('admin'))
+
 @app.route('/api/scraper/state', methods=['POST'])
 def update_scraper_state():
     auth = request.headers.get('X-API-Secret', '')
@@ -854,6 +878,8 @@ def crew_list():
         COALESCE(s.to_sttn, r.to_sttn) AS to_sttn,
         COALESCE(s.loco_no, r.loco_no) AS loco_no,
         COALESCE(s.train_no, r.train_no) AS train_no,
+        s.loco_no AS s_loco_no,
+        s.train_no AS s_train_no,
         s.bpc_no,
         s.current_location,
         s.cto_time,
@@ -891,6 +917,8 @@ def crew_list():
         COALESCE(s.to_sttn, r.to_sttn) AS to_sttn,
         COALESCE(s.loco_no, r.loco_no) AS loco_no,
         COALESCE(s.train_no, r.train_no) AS train_no,
+        s.loco_no AS s_loco_no,
+        s.train_no AS s_train_no,
         s.bpc_no,
         s.current_location,
         s.cto_time,
@@ -960,15 +988,20 @@ def crew_list():
         src = {}
 
         for field in ['loco_no', 'train_no']:
-            # Both CMS and submission may have this
+            # s_loco_no / s_train_no are the raw submission values (NULL if no submission)
+            sub_field = f's_{field}'
             if field in crew_admin_edits and crew_admin_edits[field] is not None:
+                # Admin override takes highest priority
                 src[field] = 'admin'
                 row[field] = crew_admin_edits[field]
-            elif row.get(field):  # COALESCE already picked best, but we can detect
-                # If submission has it, it takes priority in COALESCE already
-                src[field] = 'sub'  # default to sub (conservative)
-            else:
+            elif row.get(sub_field):
+                # Submission had a value for this field — COALESCE picked it (or it's the only source)
+                src[field] = 'sub'
+            elif row.get(field):
+                # Value exists but only from CMS crew_records (submission was NULL for this field)
                 src[field] = 'cms'
+            else:
+                src[field] = 'none'
 
         for field in ['bpc_no', 'cto_time']:
             if field in crew_admin_edits and crew_admin_edits[field] is not None:
@@ -983,10 +1016,14 @@ def crew_list():
             src['current_location'] = 'admin'
             row['current_location'] = crew_admin_edits['current_location']
         elif row.get('current_location'):
+            # Location exists from crew_submission (latest submission wins via MAX(id) in query)
             src['current_location'] = 'sub'
         else:
-            row['current_location'] = row.get('from_sttn')
-            src['current_location'] = 'cms'
+            # No location from admin edit or crew submission — leave blank
+            # Do NOT fall back to from_sttn: that is CMS sign-on station, not current location.
+            # PDD must not be calculated using an assumed location.
+            row['current_location'] = ''
+            src['current_location'] = 'none'
 
         for field in ['relief_station', 'relief_datetime']:
             if field in crew_admin_edits and crew_admin_edits[field] is not None:
@@ -1325,6 +1362,8 @@ def api_sync():
     
     conn.commit()
     conn.close()
+    # Stamp last successful CMS sync time (shown on admin dashboard)
+    scraper_state['last_run'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return jsonify({'status': 'ok', 'inserted': inserted, 'updated': updated, 'protected': skipped})
 
 if __name__ == '__main__':

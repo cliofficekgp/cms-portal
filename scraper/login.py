@@ -20,11 +20,27 @@ def check_stop_signal():
     stop_file = os.path.join(DATA_DIR, 'stop.txt')
     return os.path.exists(stop_file)
 
+def check_run_now_signal():
+    """Returns True and deletes the signal file if a run-now was requested."""
+    run_now_file = os.path.join(DATA_DIR, 'run_now.txt')
+    if os.path.exists(run_now_file):
+        try:
+            os.remove(run_now_file)
+        except OSError:
+            pass
+        return True
+    return False
+
 def interruptible_sleep(sleep_seconds):
-    """Sleeps for sleep_seconds, but checks for stop signal every second."""
+    """Sleeps for sleep_seconds, but checks for stop/run-now signals every second.
+    Returns True if a hard stop was signalled (caller should exit).
+    Returns False on normal completion OR on run-now signal (caller should start a new cycle).
+    """
     for _ in range(int(sleep_seconds)):
         if check_stop_signal():
-            return True # Interrupted
+            return True  # Hard stop — caller should exit
+        if check_run_now_signal():
+            return False  # Wake up early — start a new sync cycle
         time.sleep(1)
     if sleep_seconds > int(sleep_seconds):
         time.sleep(sleep_seconds - int(sleep_seconds))
