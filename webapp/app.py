@@ -513,7 +513,7 @@ def submit():
             relief_stn,   # incoming crew starts at relief station
             relief_dt,    # their CTO time = relief time
             '', '-', submitted_at,
-            0, '', '', crew_id, departure_time
+            0, '', '', crew_id, ''
         ))
 
         # Ensure crew B exists in crew_records
