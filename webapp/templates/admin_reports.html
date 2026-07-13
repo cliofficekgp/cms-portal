@@ -25,6 +25,39 @@
 
     <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
         
+        <!-- New Reports Navigation Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Duty Sheet Card -->
+            <a href="/admin/report/duty_sheet" class="block bg-white rounded-xl shadow-sm border border-indigo-100 p-6 hover:shadow-md hover:border-indigo-300 transition-all group">
+                <div class="flex items-start gap-4">
+                    <div class="p-3 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900 group-hover:text-indigo-700 transition-colors">Duty Sheet Export</h3>
+                        <p class="text-sm text-gray-500 mt-1">Export full merged crew sign-on data and manual submissions for a selected date range.</p>
+                    </div>
+                </div>
+            </a>
+            
+            <!-- Non-Submitters Card -->
+            <a href="/admin/report/non_submitters" class="block bg-white rounded-xl shadow-sm border border-rose-100 p-6 hover:shadow-md hover:border-rose-300 transition-all group">
+                <div class="flex items-start gap-4">
+                    <div class="p-3 bg-rose-50 text-rose-600 rounded-lg group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900 group-hover:text-rose-700 transition-colors">Non-Submitting Crew</h3>
+                        <p class="text-sm text-gray-500 mt-1">Find crew members who signed on during a selected date range but did not submit a manual form.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        
         <!-- Table 1: Missing BPC completely -->
         <div class="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-100 bg-red-50 flex justify-between items-center">

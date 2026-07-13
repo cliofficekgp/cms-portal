@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Non-Submitting Crew Report — CMS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    @media print {
+      .no-print { display: none !important; }
+      header { background: #be123c !important; -webkit-print-color-adjust: exact; }
+      body { background: white; }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-rose-700 shadow-sm no-print">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center text-white">
+      <h1 class="text-xl font-bold flex items-center gap-2">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        Non-Submitting Crew Report
+      </h1>
+      <div class="flex items-center gap-4 text-sm">
+        <a href="/admin/reports" class="text-rose-200 hover:text-white transition-colors">← Reports</a>
+        <a href="/admin" class="text-rose-200 hover:text-white transition-colors">Admin</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-6 space-y-5">
+
+    <!-- Date Filter Card -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 no-print">
+      <form method="GET" action="/admin/report/non_submitters" class="flex flex-wrap gap-4 items-end">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wider">From Date</label>
+          <input type="date" name="from_date" value="{{ from_date }}" required
+            class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-rose-400 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wider">To Date</label>
+          <input type="date" name="to_date" value="{{ to_date }}" required
+            class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-rose-400 focus:border-transparent">
+        </div>
+        <button type="submit"
+          class="bg-rose-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition-colors">
+          Generate
+        </button>
+        <a href="/admin/report/non_submitters?from_date={{ from_date }}&to_date={{ to_date }}&export=1"
+          class="inline-flex items-center gap-1.5 bg-emerald-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Export CSV
+        </a>
+        <button type="button" onclick="window.print()"
+          class="inline-flex items-center gap-1.5 border border-gray-300 text-gray-700 px-5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+          </svg>
+          Print
+        </button>
+      </form>
+    </div>
+
+    <!-- Result Summary -->
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">
+          Non-Submitting Crew
+          <span class="ml-2 text-sm font-normal text-gray-500">
+            {{ from_date }} → {{ to_date }}
+          </span>
+        </h2>
+        <p class="text-sm text-gray-500 mt-0.5">
+          Crew members who signed on during this period (per CMS) but did not submit the manual form.
+        </p>
+      </div>
+      {% if count > 0 %}
+      <span class="bg-rose-100 text-rose-700 text-sm font-semibold px-3 py-1 rounded-full">
+        {{ count }} Missing
+      </span>
+      {% else %}
+      <span class="bg-emerald-100 text-emerald-700 text-sm font-semibold px-3 py-1 rounded-full">
+        0 Missing (All good!)
+      </span>
+      {% endif %}
+    </div>
+
+    <!-- Data Table -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      {% if count == 0 %}
+      <div class="text-center py-20 text-gray-400 bg-emerald-50/30">
+        <div class="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <p class="text-base font-semibold text-emerald-800">All forms submitted!</p>
+        <p class="text-sm text-emerald-600 mt-1">Every crew member who signed on during this period has submitted a form.</p>
+      </div>
+      {% else %}
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm divide-y divide-gray-200">
+          <thead class="bg-rose-50 text-rose-800 font-semibold uppercase tracking-wider text-xs">
+            <tr>
+              <th class="px-4 py-3 text-left">#</th>
+              <th class="px-4 py-3 text-left">Crew ID</th>
+              <th class="px-4 py-3 text-left">Name</th>
+              <th class="px-4 py-3 text-left">Designation</th>
+              <th class="px-4 py-3 text-left">Category</th>
+              <th class="px-4 py-3 text-left">From Station</th>
+              <th class="px-4 py-3 text-left">Sign-On Time (CMS)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {% for row in data %}
+            <tr class="hover:bg-rose-50/50 transition-colors">
+              <td class="px-4 py-3 text-gray-400 font-mono text-xs">{{ loop.index }}</td>
+              <td class="px-4 py-3 font-semibold text-rose-700 font-mono">{{ row.crew_id }}</td>
+              <td class="px-4 py-3 text-gray-800">{{ row.name }}</td>
+              <td class="px-4 py-3 text-gray-600">{{ row.desig }}</td>
+              <td class="px-4 py-3 text-gray-600">{{ row.category }}</td>
+              <td class="px-4 py-3 font-medium text-gray-800">{{ row.from_sttn }}</td>
+              <td class="px-4 py-3 font-mono text-gray-600">{{ row.sign_on_time }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+
+  </main>
+</body>
+</html>

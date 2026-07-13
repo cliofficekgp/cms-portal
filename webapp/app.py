@@ -788,6 +788,253 @@ def admin_reports():
     
     return render_template('admin_reports.html', zero_bpc=zero_bpc, all_bpc_stats=all_bpc_stats)
 
+
+# ---------------------------------------------------------------------------
+# Report: Duty Sheet Export
+# ---------------------------------------------------------------------------
+
+def _parse_dt_report(val):
+    """Parse date string (DD-MM-YYYY HH:MM variants) into IST-aware datetime."""
+    if not val or val == '-':
+        return None
+    val = val.strip()
+    for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M',
+                '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
+        try:
+            return datetime.strptime(val, fmt).replace(tzinfo=IST)
+        except ValueError:
+            pass
+    return None
+
+
+def _build_duty_sheet_data(from_dt, to_dt):
+    """
+    Merge crew_records + crew_submissions + admin_edits (same priority as crew_list)
+    and filter rows whose sign_on_time falls within [from_dt, to_dt].
+    Returns a list of dicts ready for rendering / CSV export.
+    """
+    conn = get_db()
+    records  = conn.execute('SELECT * FROM crew_records').fetchall()
+    subs_raw = conn.execute('''
+        SELECT * FROM crew_submissions
+        WHERE id IN (SELECT MAX(id) FROM crew_submissions GROUP BY crew_id)
+    ''').fetchall()
+    ta_raw   = conn.execute('SELECT * FROM booking_ta_crew').fetchall()
+    ae_raw   = conn.execute('SELECT crew_id, field, value FROM admin_edits').fetchall()
+    conn.close()
+
+    subs_map = {r['crew_id']: dict(r) for r in subs_raw}
+    ta_map   = {r['crew_id']: dict(r) for r in ta_raw}
+
+    admin_edits_map = {}
+    for ae in ae_raw:
+        admin_edits_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['value']
+
+    def merge_row(r_dict, s_dict, ae, ta):
+        return {
+            'crew_id':          r_dict.get('crew_id') or s_dict.get('crew_id', ''),
+            'name':             s_dict.get('name') or r_dict.get('name', ''),
+            'desig':            s_dict.get('desig') or r_dict.get('desig', ''),
+            'sign_on_time':     r_dict.get('sign_on_time') or s_dict.get('sign_on_time', ''),
+            'from_sttn':        r_dict.get('from_sttn') or s_dict.get('from_sttn', ''),
+            'to_sttn':          s_dict.get('to_sttn') or r_dict.get('to_sttn', ''),
+            'loco_no':          ae.get('loco_no') or s_dict.get('loco_no') or r_dict.get('loco_no', ''),
+            'train_no':         ae.get('train_no') or s_dict.get('train_no') or r_dict.get('train_no', ''),
+            'bpc_no':           ae.get('bpc_no') or s_dict.get('bpc_no', ''),
+            'current_location': ae.get('current_location') or s_dict.get('current_location', ''),
+            'cto_time':         ae.get('cto_time') or s_dict.get('cto_time', ''),
+            'sign_off_time':    r_dict.get('sign_off_time', ''),
+            'is_relief':        int(ae.get('is_relief') or s_dict.get('is_relief') or 0),
+            'relief_station':   ae.get('relief_station') or s_dict.get('relief_station', ''),
+            'relief_datetime':  ae.get('relief_datetime') or s_dict.get('relief_datetime', ''),
+            'handover_crew_id': s_dict.get('handover_crew_id', ''),
+            'submitted_at':     s_dict.get('submitted_at', ''),
+            'departure_time':   s_dict.get('departure_time', ''),
+            'mobile_number':    ta.get('mobile_number', ''),
+        }
+
+    processed = {}
+    for r in records:
+        r = dict(r)
+        cid = r['crew_id']
+        processed[cid] = merge_row(r, subs_map.get(cid, {}),
+                                   admin_edits_map.get(cid, {}),
+                                   ta_map.get(cid, {}))
+
+    # Submission-only rows (crew not in CMS records)
+    for cid, s in subs_map.items():
+        if cid not in processed:
+            processed[cid] = merge_row({}, s,
+                                       admin_edits_map.get(cid, {}),
+                                       ta_map.get(cid, {}))
+
+    now = datetime.now(IST)
+    data = []
+    for row in processed.values():
+        sign_on_dt = _parse_dt_report(row.get('sign_on_time'))
+        if not sign_on_dt or not (from_dt <= sign_on_dt <= to_dt):
+            continue
+
+        # Compute live duty hours
+        delta = now - sign_on_dt
+        total_min = int(delta.total_seconds() // 60)
+        row['duty_hrs'] = f"{total_min // 60:02d}:{total_min % 60:02d}"
+
+        # Format date strings for display
+        for col in ['sign_on_time', 'cto_time', 'relief_datetime', 'departure_time']:
+            dt = _parse_dt_report(row.get(col, ''))
+            row[col] = dt.strftime('%d/%m/%y %H:%M') if dt else (row.get(col) or '-')
+
+        row['_sign_on_dt'] = sign_on_dt
+        data.append(row)
+
+    data.sort(key=lambda r: r['_sign_on_dt'], reverse=True)
+    for row in data:
+        row.pop('_sign_on_dt', None)
+
+    return data
+
+
+@app.route('/admin/report/duty_sheet')
+@login_required
+def report_duty_sheet():
+    yesterday = (datetime.now(IST) - timedelta(days=1)).date()
+    from_date_str = request.args.get('from_date', yesterday.strftime('%Y-%m-%d'))
+    to_date_str   = request.args.get('to_date',   yesterday.strftime('%Y-%m-%d'))
+    do_export     = request.args.get('export', '0') == '1'
+
+    try:
+        from_dt = datetime.strptime(from_date_str, '%Y-%m-%d').replace(
+            hour=0, minute=0, second=0, tzinfo=IST)
+        to_dt   = datetime.strptime(to_date_str,   '%Y-%m-%d').replace(
+            hour=23, minute=59, second=59, tzinfo=IST)
+    except ValueError:
+        from_dt = (datetime.now(IST) - timedelta(days=1)).replace(hour=0,  minute=0,  second=0)
+        to_dt   = from_dt.replace(hour=23, minute=59, second=59)
+        from_date_str = from_dt.strftime('%Y-%m-%d')
+        to_date_str   = to_dt.strftime('%Y-%m-%d')
+
+    data = _build_duty_sheet_data(from_dt, to_dt)
+
+    if do_export:
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            'Crew ID', 'Name', 'Designation', 'Sign-On Time', 'From Station',
+            'To Station', 'Loco No', 'Train No', 'BPC No', 'Current Location',
+            'CTO Time', 'Duty Hrs', 'Relief?', 'Relief Station',
+            'Relief Date-Time', 'Handover Crew ID', 'Submitted At', 'Mobile No'
+        ])
+        for row in data:
+            writer.writerow([
+                row.get('crew_id', ''),        row.get('name', ''),
+                row.get('desig', ''),           row.get('sign_on_time', ''),
+                row.get('from_sttn', ''),       row.get('to_sttn', ''),
+                row.get('loco_no', ''),         row.get('train_no', ''),
+                row.get('bpc_no', ''),          row.get('current_location', ''),
+                row.get('cto_time', ''),        row.get('duty_hrs', ''),
+                'Yes' if row.get('is_relief') else 'No',
+                row.get('relief_station', ''), row.get('relief_datetime', ''),
+                row.get('handover_crew_id', ''), row.get('submitted_at', ''),
+                row.get('mobile_number', ''),
+            ])
+        output.seek(0)
+        filename = f"Duty_Sheet_{from_date_str}_to_{to_date_str}.csv"
+        from flask import Response as FlaskResponse
+        return FlaskResponse(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+
+    return render_template('report_duty_sheet.html',
+                           data=data,
+                           from_date=from_date_str,
+                           to_date=to_date_str,
+                           count=len(data))
+
+
+# ---------------------------------------------------------------------------
+# Report: Non-Submitting Crew
+# ---------------------------------------------------------------------------
+
+@app.route('/admin/report/non_submitters')
+@login_required
+def report_non_submitters():
+    yesterday = (datetime.now(IST) - timedelta(days=1)).date()
+    from_date_str = request.args.get('from_date', yesterday.strftime('%Y-%m-%d'))
+    to_date_str   = request.args.get('to_date',   yesterday.strftime('%Y-%m-%d'))
+    do_export     = request.args.get('export', '0') == '1'
+
+    try:
+        from_dt = datetime.strptime(from_date_str, '%Y-%m-%d').replace(
+            hour=0, minute=0, second=0, tzinfo=IST)
+        to_dt   = datetime.strptime(to_date_str,   '%Y-%m-%d').replace(
+            hour=23, minute=59, second=59, tzinfo=IST)
+    except ValueError:
+        from_dt = (datetime.now(IST) - timedelta(days=1)).replace(hour=0,  minute=0,  second=0)
+        to_dt   = from_dt.replace(hour=23, minute=59, second=59)
+        from_date_str = from_dt.strftime('%Y-%m-%d')
+        to_date_str   = to_dt.strftime('%Y-%m-%d')
+
+    conn = get_db()
+    records  = conn.execute(
+        'SELECT crew_id, name, desig, from_sttn, sign_on_time, category FROM crew_records'
+    ).fetchall()
+    subs_all = conn.execute('SELECT crew_id, submitted_at FROM crew_submissions').fetchall()
+    conn.close()
+
+    # Crew IDs that have at least one submission within the date range
+    submitted_ids = set()
+    for row in subs_all:
+        dt = _parse_dt_report(row['submitted_at'])
+        if dt and from_dt <= dt <= to_dt:
+            submitted_ids.add(row['crew_id'])
+
+    # Crew that signed on in range but never submitted
+    non_submitters = []
+    for row in records:
+        sign_on_dt = _parse_dt_report(row['sign_on_time'])
+        if sign_on_dt and from_dt <= sign_on_dt <= to_dt:
+            if row['crew_id'] not in submitted_ids:
+                non_submitters.append({
+                    'crew_id':      row['crew_id'],
+                    'name':         row['name'] or '',
+                    'desig':        row['desig'] or '',
+                    'from_sttn':    row['from_sttn'] or '',
+                    'sign_on_time': sign_on_dt.strftime('%d/%m/%y %H:%M'),
+                    'category':     row['category'] or '',
+                })
+
+    non_submitters.sort(key=lambda r: r['crew_id'])
+
+    if do_export:
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Crew ID', 'Name', 'Designation', 'From Station', 'Sign-On Time', 'Category'])
+        for row in non_submitters:
+            writer.writerow([
+                row['crew_id'], row['name'], row['desig'],
+                row['from_sttn'], row['sign_on_time'], row['category']
+            ])
+        output.seek(0)
+        filename = f"Non_Submitters_{from_date_str}_to_{to_date_str}.csv"
+        from flask import Response as FlaskResponse
+        return FlaskResponse(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+
+    return render_template('report_non_submitters.html',
+                           data=non_submitters,
+                           from_date=from_date_str,
+                           to_date=to_date_str,
+                           count=len(non_submitters))
+
+
 @app.route('/admin/submit_action', methods=['POST'])
 @login_required
 def admin_submit_action():
