@@ -97,6 +97,8 @@ Located in `data/crew.db`. Uses SQLite.
 3. In Python, the code iterates over the rows and applies priority logic: if an `admin_edit` exists for a field, it takes precedence. Otherwise, it checks `crew_submissions`, and finally falls back to `crew_records` (CMS Data).
 4. Jinja loops through the final data array, injecting it into `crew_list.html`.
 5. Vanilla JS in the frontend calculates live duty durations and colors the cells in a gradient based on how long the crew has been on duty.
+6. **PDD Calculation**: Handled dynamically in `app.py`. For NMP and NPTY (which are treated as equivalent), if sign-on and CTO match (or are in the NMP/NPTY/KGP combination), the PDD is calculated.
+7. **Location & Relief UI**: The `crew_list.html` displays the current location along with the extracted time part. Checking the "Relief" toggle auto-populates the current local time via frontend JS.
 
 ## 5. Usage for LLM / Agents
 When tasked with modifying this codebase:

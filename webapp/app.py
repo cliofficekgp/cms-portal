@@ -1226,10 +1226,12 @@ def crew_list():
     rows = conn.execute(query).fetchall()
 
     # Load all admin_edits for efficient lookup
-    admin_edit_rows = conn.execute('SELECT crew_id, field, value FROM admin_edits').fetchall()
+    admin_edit_rows = conn.execute('SELECT crew_id, field, value, updated_at FROM admin_edits').fetchall()
     admin_edits_map = {}
+    admin_edits_time_map = {}
     for ae in admin_edit_rows:
         admin_edits_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['value']
+        admin_edits_time_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['updated_at']
 
     conn.close()
     
@@ -1289,12 +1291,21 @@ def crew_list():
             else:
                 src[field] = 'none'
 
+        row['_loc_update_time'] = ''
         if 'current_location' in crew_admin_edits and crew_admin_edits['current_location'] is not None:
             src['current_location'] = 'admin'
             row['current_location'] = crew_admin_edits['current_location']
+            loc_time = admin_edits_time_map.get(crew_id, {}).get('current_location', '')
+            if loc_time:
+                dt = parse_dt(loc_time)
+                if dt: row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
         elif row.get('current_location'):
             # Location exists from crew_submission (latest submission wins via MAX(id) in query)
             src['current_location'] = 'sub'
+            loc_time = row.get('submitted_at', '')
+            if loc_time:
+                dt = parse_dt(loc_time)
+                if dt: row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
         else:
             # No location from admin edit or crew submission — leave blank
             # Do NOT fall back to from_sttn: that is CMS sign-on station, not current location.
@@ -1342,12 +1353,23 @@ def crew_list():
         # Calculate PDD
         row['pdd'] = '-'
         lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
-        from_sttn = row.get('from_sttn', '') or ''
-        from_sttn = from_sttn.upper()
-        cto_sttn = row.get('current_location', '') or ''
-        cto_sttn = cto_sttn.upper()
+        from_sttn = (row.get('from_sttn', '') or '').upper().strip()
+        cto_sttn = (row.get('current_location', '') or '').upper().strip()
         
-        if from_sttn in lobbies and from_sttn == cto_sttn and sign_on_dt:
+        # Normalize NPTY to NMP for comparison
+        from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
+        cto_sttn_norm = 'NMP' if cto_sttn == 'NPTY' else cto_sttn
+
+        is_pdd_sttn = False
+        if sign_on_dt:
+            # Check special case: sign on in {NMP, KGP} and CTO in {NMP, KGP} (using normalized stations)
+            if from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
+                is_pdd_sttn = True
+            # Otherwise, check if sign on station is in standard lobbies and equals the CTO station
+            elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
+                is_pdd_sttn = True
+
+        if is_pdd_sttn:
             departure_dt = parse_dt(row.get('departure_time'))
             end_time = departure_dt if departure_dt else now
             pdd_delta = end_time - sign_on_dt

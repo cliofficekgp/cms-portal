@@ -86,7 +86,7 @@
         th.sorted-asc::after  { content: ' ▲'; font-size: 8px; color: #60a5fa; }
         th.sorted-desc::after { content: ' ▼'; font-size: 8px; color: #60a5fa; }
 
-        tbody tr { border-bottom: 1px solid #1e293b; transition: background 0.15s; }
+        tbody tr { border-bottom: 1px solid #475569; transition: background 0.15s; }
         tbody tr:hover { background: rgba(30,58,138,0.25) !important; }
         tbody tr.row-ns     { background: rgba(99,102,241,0.22) !important; font-weight: 600; }
         tbody tr.row-miss   { background: rgba(239,68,68,0.13) !important; }
@@ -374,6 +374,11 @@
                                    placeholder="Stn" autocomplete="off" maxlength="10">
                             <div class="ac-dropdown"></div>
                         </div>
+                        {% if crew._loc_update_time %}
+                        <div class="location-time" style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                            {{ crew._loc_update_time.split(' ')[1] if ' ' in crew._loc_update_time else crew._loc_update_time }}
+                        </div>
+                        {% endif %}
                     </td>
 
                     <!-- CTO Time (datetime picker, center) -->
@@ -393,10 +398,10 @@
                             </div>
                         {% else %}
                             <div class="relief-wrap">
-                                <div class="relief-check-row">
+                                <label class="relief-check-row" style="cursor: pointer;">
                                     <input type="checkbox" class="relief-toggle" data-crew="{{ crew.crew_id }}">
                                     <span class="relief-toggle-label">Relief</span>
-                                </div>
+                                </label>
                                 <div class="relief-fields hidden-fields">
                                     <div class="relief-stn-wrap">
                                         <input type="text" class="relief-stn-input"
@@ -665,9 +670,9 @@ document.querySelectorAll('.relief-toggle').forEach(cb => {
         const fields = wrap.querySelector('.relief-fields');
         if (this.checked) {
             fields.classList.remove('hidden-fields');
-            // Auto-populate datetime with current IST if empty
+            // Auto-populate datetime with current IST
             const dtInp = fields.querySelector('.relief-dt-input');
-            if (dtInp && !dtInp.value) {
+            if (dtInp) {
                 dtInp.value = toISOLocal(getISTNow());
                 markFieldDirty(crewId, 'relief_datetime', () => fromDatetimeLocal(dtInp.value));
             }
