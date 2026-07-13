@@ -35,6 +35,17 @@ DB_PATH = os.environ.get('DB_PATH', os.path.join(BASE_DIR, 'data', 'crew.db'))
 
 IST = ZoneInfo("Asia/Kolkata")
 
+def parse_dt(val):
+    if not val or val == '-': return None
+    val = val.strip()
+    for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M', '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
+        try:
+            dt = datetime.strptime(val, fmt)
+            return dt.replace(tzinfo=IST)
+        except ValueError:
+            pass
+    return None
+
 # Global state for scraper
 scraper_state = {
     'status': 'starting',
@@ -1243,16 +1254,7 @@ def crew_list():
     EDITABLE_FIELDS = ['loco_no', 'train_no', 'bpc_no', 'current_location', 'cto_time',
                        'is_relief', 'relief_station', 'relief_datetime']
     
-    def parse_dt(val):
-        if not val or val == '-': return None
-        val = val.strip()
-        for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M', '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
-            try:
-                dt = datetime.strptime(val, fmt)
-                return dt.replace(tzinfo=IST)
-            except ValueError:
-                pass
-        return None
+
 
     for row in data:
         crew_id = row.get('crew_id', '')
@@ -1292,26 +1294,48 @@ def crew_list():
                 src[field] = 'none'
 
         row['_loc_update_time'] = ''
+        loc_time_dt = None
         if 'current_location' in crew_admin_edits and crew_admin_edits['current_location'] is not None:
             src['current_location'] = 'admin'
             row['current_location'] = crew_admin_edits['current_location']
             loc_time = admin_edits_time_map.get(crew_id, {}).get('current_location', '')
             if loc_time:
                 dt = parse_dt(loc_time)
-                if dt: row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
+                if dt: 
+                    row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
+                    loc_time_dt = dt
         elif row.get('current_location'):
             # Location exists from crew_submission (latest submission wins via MAX(id) in query)
             src['current_location'] = 'sub'
             loc_time = row.get('submitted_at', '')
             if loc_time:
                 dt = parse_dt(loc_time)
-                if dt: row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
+                if dt: 
+                    row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
+                    loc_time_dt = dt
         else:
             # No location from admin edit or crew submission — leave blank
             # Do NOT fall back to from_sttn: that is CMS sign-on station, not current location.
             # PDD must not be calculated using an assumed location.
             row['current_location'] = ''
             src['current_location'] = 'none'
+
+        # Auto-remove location if departure time is after the location update time
+        if loc_time_dt and row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
+            dep_dt = parse_dt(row['departure_time'])
+            if dep_dt and dep_dt > loc_time_dt:
+                try:
+                    cleanup_conn = get_db()
+                    cleanup_conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (crew_id,))
+                    cleanup_conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (crew_id,))
+                    cleanup_conn.commit()
+                    cleanup_conn.close()
+                except Exception as e:
+                    print(f"Cleanup location error: {e}")
+                
+                row['current_location'] = ''
+                src['current_location'] = 'none'
+                row['_loc_update_time'] = ''
 
         for field in ['relief_station', 'relief_datetime']:
             if field in crew_admin_edits and crew_admin_edits[field] is not None:
@@ -1391,16 +1415,25 @@ def crew_list():
             if ord_dt:
                 if abs((sign_on_dt - ord_dt).total_seconds()) > 7200:
                     row['ordering_time'] = '-'
+                else:
+                    row['ordering_time'] = ord_dt.strftime('%H:%M')
             else:
                 row['ordering_time'] = '-'
 
         # Format dates universally (DD/MM/YY HH:MM) — happens AFTER capturing sort keys above
-        for col in ['sign_on_time', 'cto_time', 'relief_datetime', 'departure_time']:
+        for col in ['sign_on_time', 'relief_datetime', 'departure_time']:
             dt = parse_dt(row.get(col, ''))
             if dt:
                 row[col] = dt.strftime('%d/%m/%y %H:%M')
             elif col in row and not row[col]:
                 row[col] = '-'
+
+        # Format cto_time as time only
+        dt_cto = parse_dt(row.get('cto_time', ''))
+        if dt_cto:
+            row['cto_time'] = dt_cto.strftime('%H:%M')
+        elif 'cto_time' in row and not row['cto_time']:
+            row['cto_time'] = '-'
 
     def list_sort_key(r):
         return (r['_sign_on_dt'], r['_cto_dt'])
@@ -1446,8 +1479,31 @@ def api_admin_edit():
     if not crew_id or field not in ALLOWED_FIELDS:
         return jsonify({'status': 'error', 'message': 'Invalid field or crew_id'}), 400
 
-    updated_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
     conn = get_db()
+
+    if field == 'cto_time' and value and value not in ['-', '–']:
+        # We need to construct the full datetime based on sign_on_time
+        r = conn.execute('''
+            SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time 
+            FROM crew_records r 
+            LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id 
+            WHERE r.crew_id = ?
+            ORDER BY s.id DESC LIMIT 1
+        ''', (crew_id,)).fetchone()
+        
+        if r and r['sign_on_time']:
+            sign_on_dt = parse_dt(r['sign_on_time'])
+            if sign_on_dt:
+                try:
+                    h, m = map(int, value.split(':'))
+                    new_dt = sign_on_dt.replace(hour=h, minute=m, second=0)
+                    if new_dt < sign_on_dt:
+                        new_dt += timedelta(days=1)
+                    value = new_dt.strftime('%d-%m-%Y %H:%M:%S')
+                except ValueError:
+                    pass
+
+    updated_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
     conn.execute('''
         INSERT INTO admin_edits (crew_id, field, value, updated_at)
         VALUES (?, ?, ?, ?)

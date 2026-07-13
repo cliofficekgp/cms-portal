@@ -381,9 +381,9 @@
                         {% endif %}
                     </td>
 
-                    <!-- CTO Time (datetime picker, center) -->
+                    <!-- CTO Time (time picker, center) -->
                     <td class="src-{{ src.cto_time }} td-center">
-                        <input type="datetime-local" class="dt-input"
+                        <input type="time" class="dt-input"
                                data-field="cto_time" data-crew="{{ crew.crew_id }}"
                                data-raw="{{ crew.cto_time if crew.cto_time else '' }}"
                                title="{{ crew.cto_time if crew.cto_time else 'Not set' }}">
@@ -553,15 +553,26 @@ function markFieldDirty(crewId, field, getter) {
    ================================================================ */
 document.querySelectorAll('.dt-input, .relief-dt-input').forEach(inp => {
     const raw = inp.dataset.raw;
-    const dt = parseDisplayDate(raw);
-    if (dt && !isNaN(dt.getTime())) inp.value = toISOLocal(dt);
+    
+    if (inp.type === 'time') {
+        if (raw && raw !== '-' && raw !== '–') {
+            // raw might be "14:30" or "DD/MM/YY HH:MM"
+            const parts = raw.split(' ');
+            inp.value = parts.length === 2 ? parts[1] : raw;
+        }
+        inp.addEventListener('change', () => {
+            inp.classList.add('field-dirty');
+            markFieldDirty(inp.dataset.crew, inp.dataset.field, () => inp.value);
+        });
+    } else {
+        const dt = parseDisplayDate(raw);
+        if (dt && !isNaN(dt.getTime())) inp.value = toISOLocal(dt);
 
-    inp.addEventListener('change', () => {
-        inp.classList.add('field-dirty');
-        const crew = inp.dataset.crew;
-        const field = inp.dataset.field;
-        markFieldDirty(crew, field, () => fromDatetimeLocal(inp.value));
-    });
+        inp.addEventListener('change', () => {
+            inp.classList.add('field-dirty');
+            markFieldDirty(inp.dataset.crew, inp.dataset.field, () => fromDatetimeLocal(inp.value));
+        });
+    }
 });
 
 /* ================================================================
