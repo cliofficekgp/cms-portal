@@ -232,16 +232,23 @@ def init_db():
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS cms_settings (
-            id            INTEGER PRIMARY KEY,
-            cms_username  TEXT,
-            cms_password  TEXT
+            id                  INTEGER PRIMARY KEY,
+            cms_username        TEXT,
+            cms_password        TEXT,
+            allow_manual_entry  INTEGER DEFAULT 1
         )
     ''')
+
+    # Migration: add allow_manual_entry column to existing DBs
+    try:
+        cur.execute('ALTER TABLE cms_settings ADD COLUMN allow_manual_entry INTEGER DEFAULT 1')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     row_count = cur.execute('SELECT COUNT(*) FROM cms_settings').fetchone()[0]
     if row_count == 0:
         cur.execute(
-            'INSERT INTO cms_settings (id, cms_username, cms_password) VALUES (1, ?, ?)',
+            'INSERT INTO cms_settings (id, cms_username, cms_password, allow_manual_entry) VALUES (1, ?, ?, 1)',
             ('KGPCLIHQ', 'Cms@852')
         )
 
@@ -339,12 +346,30 @@ def crew_login():
 
         conn = get_db()
         row = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
+
+        # If crew is not in CMS records, check if admin allows manual entry
+        if not row:
+            settings = conn.execute(
+                'SELECT allow_manual_entry FROM cms_settings WHERE id = 1'
+            ).fetchone()
+            conn.close()
+            allow_manual = settings['allow_manual_entry'] if settings else 1
+            if not allow_manual:
+                return render_template(
+                    'login.html',
+                    error=(
+                        'Your Crew ID is not registered in the system. '
+                        'Manual entry is currently disabled. '
+                        'Please contact the admin.'
+                    )
+                )
+            # Manual entry allowed by admin — proceed to blank form
+            session['crew_id'] = crew_id
+            return redirect(url_for('form', manual='1'))
+
         conn.close()
-        
         session['crew_id'] = crew_id
-        if row:
-            return redirect(url_for('form'))
-        return redirect(url_for('form', manual='1'))
+        return redirect(url_for('form'))
     return render_template('login.html')
 
 @app.route('/form')
@@ -710,9 +735,14 @@ def admin_settings():
     if request.method == 'POST':
         cms_user = request.form.get('cms_username', '').strip()
         cms_pass = request.form.get('cms_password', '').strip()
+        # Checkbox: present = 1, absent = 0
+        allow_manual = 1 if request.form.get('allow_manual_entry') == 'on' else 0
         if cms_user and cms_pass:
             try:
-                conn.execute('UPDATE cms_settings SET cms_username = ?, cms_password = ? WHERE id = 1', (cms_user, cms_pass))
+                conn.execute(
+                    'UPDATE cms_settings SET cms_username = ?, cms_password = ?, allow_manual_entry = ? WHERE id = 1',
+                    (cms_user, cms_pass, allow_manual)
+                )
                 conn.commit()
                 flash('Settings saved successfully.', 'success')
             except Exception as e:
@@ -720,7 +750,7 @@ def admin_settings():
             return redirect(url_for('admin_settings'))
         else:
             flash('Both username and password are required.', 'error')
-    row = conn.execute('SELECT cms_username, cms_password FROM cms_settings WHERE id = 1').fetchone()
+    row = conn.execute('SELECT cms_username, cms_password, allow_manual_entry FROM cms_settings WHERE id = 1').fetchone()
     conn.close()
     return render_template('admin_settings.html', settings=row)
 
