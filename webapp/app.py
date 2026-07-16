@@ -1351,7 +1351,7 @@ def crew_list():
             else:
                 src[field] = 'none'
 
-        for field in ['bpc_no', 'cto_time']:
+        for field in ['bpc_no', 'cto_time', 'departure_time']:
             if field in crew_admin_edits and crew_admin_edits[field] is not None:
                 src[field] = 'admin'
                 row[field] = crew_admin_edits[field]
@@ -1570,14 +1570,14 @@ def api_admin_edit():
     value   = payload.get('value', '').strip()
 
     ALLOWED_FIELDS = {'loco_no', 'train_no', 'bpc_no', 'current_location',
-                      'cto_time', 'is_relief', 'relief_station', 'relief_datetime'}
+                      'cto_time', 'departure_time', 'is_relief', 'relief_station', 'relief_datetime'}
     if not crew_id or field not in ALLOWED_FIELDS:
         return jsonify({'status': 'error', 'message': 'Invalid field or crew_id'}), 400
 
     conn = get_db()
 
-    if field == 'cto_time' and value and value not in ['-', '–']:
-        # We need to construct the full datetime based on sign_on_time
+    if field in ('cto_time', 'departure_time') and value and value not in ['-', '–']:
+        # Construct full datetime from sign_on_time + submitted time
         r = conn.execute('''
             SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time 
             FROM crew_records r 

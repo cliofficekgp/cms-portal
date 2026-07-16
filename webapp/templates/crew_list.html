@@ -298,19 +298,19 @@
                 <tr>
                     <th data-col="0">Crew ID</th>
                     <th data-col="1">Name</th>
-                    <th data-col="2">Sign On</th>
-                    <th data-col="3" style="text-align:center">CTO Time</th>
-                    <th data-col="4" style="text-align:center">Dept Time</th>
-                    <th data-col="5">PDD</th>
-                    <th data-col="6">Duty Hrs</th>
-                    <th data-col="7">From</th>
-                    <th data-col="8">To</th>
-                    <th data-col="9" style="text-align:center">Loco No</th>
-                    <th data-col="10">Train No</th>
-                    <th data-col="11" style="text-align:center">BPC No</th>
-                    <th data-col="12" style="text-align:center">Location</th>
-                    <th data-col="13" style="text-align:center">Relief</th>
-                    <th data-col="14">Ord Time</th>
+                    <th data-col="2">Ord Time</th>
+                    <th data-col="3">Sign On</th>
+                    <th data-col="4" style="text-align:center">CTO Time</th>
+                    <th data-col="5" style="text-align:center">Dept Time</th>
+                    <th data-col="6">PDD</th>
+                    <th data-col="7">Duty Hrs</th>
+                    <th data-col="8">From</th>
+                    <th data-col="9">To</th>
+                    <th data-col="10" style="text-align:center">Loco No</th>
+                    <th data-col="11">Train No</th>
+                    <th data-col="12" style="text-align:center">BPC No</th>
+                    <th data-col="13" style="text-align:center">Location</th>
+                    <th data-col="14" style="text-align:center">Relief</th>
                     <th data-col="15">Mobile No</th>
                     <th data-col="16">Found NS?</th>
                 </tr>
@@ -328,6 +328,9 @@
                     <!-- Name -->
                     <td class="name-cell" title="{{ crew.name }}">{{ crew.name }}</td>
 
+                    <!-- Ord Time -->
+                    <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '–' }}</td>
+
                     <!-- Sign On -->
                     <td style="white-space:nowrap">{{ crew.sign_on_time }}</td>
 
@@ -339,9 +342,12 @@
                                title="{{ crew.cto_time if crew.cto_time else 'Not set' }}">
                     </td>
 
-                    <!-- Dept Time (time only, read-only display) -->
-                    <td class="td-center" style="white-space:nowrap;color:#7dd3fc;font-weight:600;">
-                        {{ crew.departure_time if crew.departure_time and crew.departure_time != '-' else '–' }}
+                    <!-- Dept Time (editable time, center) -->
+                    <td class="src-{{ src.departure_time }} td-center">
+                        <input type="time" class="dt-input"
+                               data-field="departure_time" data-crew="{{ crew.crew_id }}"
+                               data-raw="{{ crew.departure_time if crew.departure_time else '' }}"
+                               title="{{ crew.departure_time if crew.departure_time else 'Not set' }}">
                     </td>
 
                     <!-- PDD -->
@@ -395,7 +401,6 @@
                         {% endif %}
                     </td>
 
-
                     <!-- Relief (checkbox + station autocomplete + datetime) -->
                     <td class="src-{{ src.relief_station }} td-center">
                         {% if crew.is_relief == 1 %}
@@ -424,8 +429,6 @@
                         {% endif %}
                     </td>
 
-                    <!-- Ord Time -->
-                    <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '–' }}</td>
 
                     <!-- Mobile No (all numbers + add button) -->
                     <td>
@@ -453,7 +456,7 @@
                 </tr>
                 {% endfor %}
                 {% if not crew_list %}
-                <tr class="empty-row"><td colspan="16">No crew records found.</td></tr>
+                                <tr class="empty-row"><td colspan="17">No crew records found.</td></tr>
                 {% endif %}
             </tbody>
         </table>
