@@ -99,45 +99,6 @@ def run_scraper_thread():
             import time
             time.sleep(30)
 
-# (threads are started after get_db/init_db are defined below)
-
-# ---------------------------------------------------------------------------
-# Cleanup Thread (Hard Delete > 1 Month)
-# ---------------------------------------------------------------------------
-
-def run_cleanup_thread():
-    while True:
-        try:
-            print("[Thread] Running cleanup job...")
-            conn = get_db()
-            cutoff = datetime.now(IST) - timedelta(days=30)
-            
-            # Clean crew_submissions
-            subs = conn.execute('SELECT id, sign_on_time FROM crew_submissions').fetchall()
-            for row in subs:
-                try:
-                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
-                    if dt < cutoff:
-                        conn.execute('DELETE FROM crew_submissions WHERE id = ?', (row['id'],))
-                except: pass
-            
-            # Clean crew_records
-            recs = conn.execute('SELECT crew_id, sign_on_time FROM crew_records').fetchall()
-            for row in recs:
-                try:
-                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
-                    if dt < cutoff:
-                        conn.execute('DELETE FROM crew_records WHERE crew_id = ?', (row['crew_id'],))
-                except: pass
-            
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"[Thread] Cleanup thread exception: {e}")
-        import time
-        time.sleep(3600) # Run every hour
-
-# (cleanup thread started after get_db is defined below)
 
 # ---------------------------------------------------------------------------
 # Database helpers
@@ -145,8 +106,15 @@ def run_cleanup_thread():
 
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=20.0)
-    conn.execute("PRAGMA journal_mode=WAL;")
     conn.row_factory = sqlite3.Row
+    for attempt in range(5):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA busy_timeout=30000;")
+            break
+        except sqlite3.OperationalError:
+            import time
+            time.sleep(2)
     return conn
 
 def init_db():
@@ -294,6 +262,53 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+
+# (threads are started after get_db/init_db are defined below)
+
+# ---------------------------------------------------------------------------
+# Cleanup Thread (Hard Delete > 1 Month)
+# ---------------------------------------------------------------------------
+
+def run_cleanup_thread():
+    while True:
+        conn = None
+        try:
+            print("[Thread] Running cleanup job...")
+            conn = get_db()
+            cutoff = datetime.now(IST) - timedelta(days=30)
+            
+            # Clean crew_submissions
+            subs = conn.execute('SELECT id, sign_on_time FROM crew_submissions').fetchall()
+            for row in subs:
+                try:
+                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
+                    if dt < cutoff:
+                        conn.execute('DELETE FROM crew_submissions WHERE id = ?', (row['id'],))
+                except: pass
+            
+            # Clean crew_records
+            recs = conn.execute('SELECT crew_id, sign_on_time FROM crew_records').fetchall()
+            for row in recs:
+                try:
+                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
+                    if dt < cutoff:
+                        conn.execute('DELETE FROM crew_records WHERE crew_id = ?', (row['crew_id'],))
+                except: pass
+            
+            conn.commit()
+        except Exception as e:
+            print(f"[Thread] Cleanup thread exception: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except: pass
+        import time
+        time.sleep(3600) # Run every hour
+
+# (cleanup thread started after get_db is defined below)
+
 
 # ---------------------------------------------------------------------------
 # Start background threads (here so get_db/init_db are already defined)
