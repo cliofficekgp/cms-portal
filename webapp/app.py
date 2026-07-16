@@ -1489,7 +1489,7 @@ def crew_list():
                 row['ordering_time'] = '-'
 
         # Format dates universally (DD/MM/YY HH:MM) — happens AFTER capturing sort keys above
-        for col in ['sign_on_time', 'relief_datetime', 'departure_time']:
+        for col in ['sign_on_time', 'relief_datetime']:
             dt = parse_dt(row.get(col, ''))
             if dt:
                 row[col] = dt.strftime('%d/%m/%y %H:%M')
@@ -1502,6 +1502,13 @@ def crew_list():
             row['cto_time'] = dt_cto.strftime('%H:%M')
         elif 'cto_time' in row and not row['cto_time']:
             row['cto_time'] = '-'
+
+        # Format departure_time as time only
+        dt_dep = parse_dt(row.get('departure_time', ''))
+        if dt_dep:
+            row['departure_time'] = dt_dep.strftime('%H:%M')
+        elif 'departure_time' in row and not row['departure_time']:
+            row['departure_time'] = '-'
 
     # --- Execute all deferred DB cleanup in one batch using the single conn ---
     try:

@@ -299,19 +299,20 @@
                     <th data-col="0">Crew ID</th>
                     <th data-col="1">Name</th>
                     <th data-col="2">Sign On</th>
-                    <th data-col="3">PDD</th>
-                    <th data-col="4">Duty Hrs</th>
-                    <th data-col="5">From</th>
-                    <th data-col="6">To</th>
-                    <th data-col="7" style="text-align:center">Loco No</th>
-                    <th data-col="8">Train No</th>
-                    <th data-col="9" style="text-align:center">BPC No</th>
-                    <th data-col="10" style="text-align:center">Location</th>
-                    <th data-col="11" style="text-align:center">CTO Time</th>
-                    <th data-col="12" style="text-align:center">Relief</th>
-                    <th data-col="13">Ord Time</th>
-                    <th data-col="14">Mobile No</th>
-                    <th data-col="15">Found NS?</th>
+                    <th data-col="3" style="text-align:center">CTO Time</th>
+                    <th data-col="4" style="text-align:center">Dept Time</th>
+                    <th data-col="5">PDD</th>
+                    <th data-col="6">Duty Hrs</th>
+                    <th data-col="7">From</th>
+                    <th data-col="8">To</th>
+                    <th data-col="9" style="text-align:center">Loco No</th>
+                    <th data-col="10">Train No</th>
+                    <th data-col="11" style="text-align:center">BPC No</th>
+                    <th data-col="12" style="text-align:center">Location</th>
+                    <th data-col="13" style="text-align:center">Relief</th>
+                    <th data-col="14">Ord Time</th>
+                    <th data-col="15">Mobile No</th>
+                    <th data-col="16">Found NS?</th>
                 </tr>
             </thead>
             <tbody id="tableBody">
@@ -329,6 +330,19 @@
 
                     <!-- Sign On -->
                     <td style="white-space:nowrap">{{ crew.sign_on_time }}</td>
+
+                    <!-- CTO Time (time picker, center) -->
+                    <td class="src-{{ src.cto_time }} td-center">
+                        <input type="time" class="dt-input"
+                               data-field="cto_time" data-crew="{{ crew.crew_id }}"
+                               data-raw="{{ crew.cto_time if crew.cto_time else '' }}"
+                               title="{{ crew.cto_time if crew.cto_time else 'Not set' }}">
+                    </td>
+
+                    <!-- Dept Time (time only, read-only display) -->
+                    <td class="td-center" style="white-space:nowrap;color:#7dd3fc;font-weight:600;">
+                        {{ crew.departure_time if crew.departure_time and crew.departure_time != '-' else '–' }}
+                    </td>
 
                     <!-- PDD -->
                     <td style="color:#f87171;font-weight:700;">{{ crew.pdd }}</td>
@@ -381,13 +395,6 @@
                         {% endif %}
                     </td>
 
-                    <!-- CTO Time (time picker, center) -->
-                    <td class="src-{{ src.cto_time }} td-center">
-                        <input type="time" class="dt-input"
-                               data-field="cto_time" data-crew="{{ crew.crew_id }}"
-                               data-raw="{{ crew.cto_time if crew.cto_time else '' }}"
-                               title="{{ crew.cto_time if crew.cto_time else 'Not set' }}">
-                    </td>
 
                     <!-- Relief (checkbox + station autocomplete + datetime) -->
                     <td class="src-{{ src.relief_station }} td-center">
