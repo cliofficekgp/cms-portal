@@ -107,20 +107,41 @@ def run_scraper_thread():
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=20.0)
     conn.row_factory = sqlite3.Row
-    for attempt in range(5):
-        try:
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA busy_timeout=30000;")
-            break
-        except sqlite3.OperationalError:
-            import time
-            time.sleep(2)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=30000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except sqlite3.OperationalError as e:
+        print(f"[DB] PRAGMA setup warning: {e}")
     return conn
+
+def _recover_wal_if_needed():
+    """On startup, checkpoint and clean up any leftover WAL files to prevent disk I/O errors."""
+    wal_path = DB_PATH + '-wal'
+    shm_path = DB_PATH + '-shm'
+    if not os.path.exists(wal_path):
+        return
+    print("[DB] WAL file detected on startup — running checkpoint to recover...")
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        conn.close()
+        print("[DB] WAL checkpoint completed successfully.")
+    except Exception as e:
+        print(f"[DB] WAL checkpoint failed, attempting to remove WAL files: {e}")
+        try:
+            os.remove(wal_path)
+        except: pass
+        try:
+            os.remove(shm_path)
+        except: pass
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    _recover_wal_if_needed()
     conn = get_db()
     cur = conn.cursor()
+
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS crew_records (
