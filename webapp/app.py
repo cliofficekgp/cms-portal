@@ -1260,6 +1260,50 @@ def crew_list():
         crew_id = row.get('crew_id', '')
         crew_admin_edits = admin_edits_map.get(crew_id, {})
 
+        sign_on_dt = None
+        if row.get('sign_on_time') and row['sign_on_time'] not in ['-', '–']:
+            sign_on_dt = parse_dt(row['sign_on_time'])
+
+        # --- Retroactive Stale Data Cleanup ---
+        if sign_on_dt:
+            # 1. Clean stale admin edits
+            stale_fields = []
+            for field, val in list(crew_admin_edits.items()):
+                ae_time = admin_edits_time_map.get(crew_id, {}).get(field)
+                if ae_time:
+                    ae_dt = parse_dt(ae_time)
+                    if ae_dt and ae_dt < sign_on_dt:
+                        stale_fields.append(field)
+            
+            if stale_fields:
+                try:
+                    cleanup_conn = get_db()
+                    for field in stale_fields:
+                        cleanup_conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (crew_id, field))
+                        del crew_admin_edits[field]
+                    cleanup_conn.commit()
+                    cleanup_conn.close()
+                except Exception as e:
+                    print(f"Cleanup stale admin edit error: {e}")
+
+            # 2. Clean stale crew submissions
+            sub_time = row.get('submitted_at')
+            if sub_time:
+                sub_dt = parse_dt(sub_time)
+                if sub_dt and sub_dt < sign_on_dt:
+                    try:
+                        cleanup_conn = get_db()
+                        cleanup_conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (crew_id,))
+                        cleanup_conn.commit()
+                        cleanup_conn.close()
+                    except Exception as e:
+                        print(f"Cleanup stale submission error: {e}")
+                    # Wipe submission data from current row so UI immediately ignores it
+                    for sf in ['s_loco_no', 's_train_no', 'bpc_no', 'cto_time', 'is_relief', 'relief_station', 'relief_datetime']:
+                        if sf in row:
+                            row[sf] = None
+                    row['submitted_at'] = None
+
         # --- Determine data source for each editable field ---
         # Source priority: admin > crew submission > cms record
         # We re-fetch from the raw query: loco_no, train_no come from COALESCE(s.loco_no, r.loco_no)
@@ -1359,20 +1403,36 @@ def crew_list():
         row['_src'] = src
 
         # Calculate Duty Hours (raw minutes stored for gradient sorting)
-        sign_on_dt = None
-        if row.get('sign_on_time') and row['sign_on_time'] != '-':
-            sign_on_dt = parse_dt(row['sign_on_time'])
-            if sign_on_dt:
-                delta = now - sign_on_dt
-                total_minutes = int(delta.total_seconds() // 60)
-                hours = total_minutes // 60
-                minutes = total_minutes % 60
-                row['duty_hrs'] = f"{hours:02d}:{minutes:02d}"
-                row['_duty_minutes'] = total_minutes  # for gradient
-            else:
-                row['_duty_minutes'] = 0
+        if sign_on_dt:
+            delta = now - sign_on_dt
+            total_minutes = int(delta.total_seconds() // 60)
+            hours = total_minutes // 60
+            minutes = total_minutes % 60
+            row['duty_hrs'] = f"{hours:02d}:{minutes:02d}"
+            row['_duty_minutes'] = total_minutes  # for gradient
         else:
             row['_duty_minutes'] = 0
+
+        # Auto-remove stale relief data if relief_datetime is before current sign_on_time
+        if sign_on_dt and row.get('relief_datetime') and row['relief_datetime'] not in ['-', '–']:
+            relief_dt = parse_dt(row['relief_datetime'])
+            if relief_dt and relief_dt < sign_on_dt:
+                try:
+                    cleanup_conn = get_db()
+                    cleanup_conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (crew_id,))
+                    cleanup_conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (crew_id,))
+                    cleanup_conn.commit()
+                    cleanup_conn.close()
+                except Exception as e:
+                    print(f"Cleanup relief error: {e}")
+                
+                # Clear from current row so UI reflects immediately
+                row['is_relief'] = 0
+                row['relief_station'] = ''
+                row['relief_datetime'] = ''
+                src['is_relief'] = 'none'
+                src['relief_station'] = 'none'
+                src['relief_datetime'] = 'none'
 
         # Calculate PDD
         row['pdd'] = '-'
@@ -1652,9 +1712,22 @@ def api_sync():
         if existing:
             existing = dict(existing)
             sub = conn.execute('SELECT id FROM crew_submissions WHERE crew_id = ?', (crew_id,)).fetchone()
-            has_manual_sub = False
-            if sub:
-                has_manual_sub = sign_on_match(existing.get('sign_on_time'), rec.get('sign_on_time'), 60)
+            
+            old_dt = parse_dt(existing.get('sign_on_time'))
+            new_dt = parse_dt(rec.get('sign_on_time'))
+            is_new_shift = False
+            if old_dt and new_dt:
+                if abs((old_dt - new_dt).total_seconds()) > 3600:
+                    is_new_shift = True
+            elif str(existing.get('sign_on_time') or '').strip() != str(rec.get('sign_on_time') or '').strip():
+                is_new_shift = True
+
+            if is_new_shift:
+                conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
+                conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
+                has_manual_sub = False
+            else:
+                has_manual_sub = bool(sub)
 
             if has_manual_sub:
                 conn.execute('''
@@ -1677,6 +1750,10 @@ def api_sync():
                 ))
                 updated += 1
         else:
+            # Brand new crew detected. Wipe any ancient stale data just in case.
+            conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
+            conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
+            
             conn.execute('''
                 INSERT INTO crew_records
                     (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
