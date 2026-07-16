@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 set -e
 
 chown -R appuser:appuser /app/data
@@ -20,7 +20,18 @@ gosu appuser bash -c '
   done
 ' &
 
-# Give the tunnel a moment to establish before the app starts
-sleep 3
+# Wait until the SOCKS5 tunnel is actually listening on port 1080 (up to 60s)
+echo "Waiting for SOCKS5 tunnel on port 1080..."
+for i in $(seq 1 30); do
+  if nc -z 127.0.0.1 1080 2>/dev/null; then
+    echo "Tunnel ready after ${i}s."
+    break
+  fi
+  sleep 2
+done
+
+if ! nc -z 127.0.0.1 1080 2>/dev/null; then
+  echo "WARNING: SOCKS5 tunnel not ready after 60s — starting app anyway."
+fi
 
 exec gosu appuser gunicorn --config gunicorn.conf.py webapp.wsgi:app

@@ -1260,15 +1260,18 @@ def crew_list():
         admin_edits_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['value']
         admin_edits_time_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['updated_at']
 
-    conn.close()
-    
+    # NOTE: conn stays open — we will batch all cleanup writes through it at the end
     data = [dict(row) for row in rows]
     
     now = datetime.now(IST)
 
-    # Fields tracked for source attribution
-    EDITABLE_FIELDS = ['loco_no', 'train_no', 'bpc_no', 'current_location', 'cto_time',
-                       'is_relief', 'relief_station', 'relief_datetime']
+    # Deferred cleanup lists — collected during the loop, executed in one batch at the end
+    _del_admin_edits    = []   # (crew_id, field)
+    _del_submissions    = []   # crew_id
+    _del_loc_admin      = []   # crew_id
+    _null_loc_sub       = []   # crew_id
+    _del_relief_admin   = []   # crew_id
+    _null_relief_sub    = []   # crew_id
     
 
 
@@ -1280,41 +1283,24 @@ def crew_list():
         if row.get('sign_on_time') and row['sign_on_time'] not in ['-', '–']:
             sign_on_dt = parse_dt(row['sign_on_time'])
 
-        # --- Retroactive Stale Data Cleanup ---
+        # --- Retroactive Stale Data Cleanup (deferred) ---
         if sign_on_dt:
-            # 1. Clean stale admin edits
-            stale_fields = []
-            for field, val in list(crew_admin_edits.items()):
+            # 1. Queue stale admin edits for deletion
+            for field in list(crew_admin_edits.keys()):
                 ae_time = admin_edits_time_map.get(crew_id, {}).get(field)
                 if ae_time:
                     ae_dt = parse_dt(ae_time)
                     if ae_dt and ae_dt < sign_on_dt:
-                        stale_fields.append(field)
-            
-            if stale_fields:
-                try:
-                    cleanup_conn = get_db()
-                    for field in stale_fields:
-                        cleanup_conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (crew_id, field))
+                        _del_admin_edits.append((crew_id, field))
                         del crew_admin_edits[field]
-                    cleanup_conn.commit()
-                    cleanup_conn.close()
-                except Exception as e:
-                    print(f"Cleanup stale admin edit error: {e}")
 
-            # 2. Clean stale crew submissions
+            # 2. Queue stale crew submissions for deletion
             sub_time = row.get('submitted_at')
             if sub_time:
                 sub_dt = parse_dt(sub_time)
                 if sub_dt and sub_dt < sign_on_dt:
-                    try:
-                        cleanup_conn = get_db()
-                        cleanup_conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (crew_id,))
-                        cleanup_conn.commit()
-                        cleanup_conn.close()
-                    except Exception as e:
-                        print(f"Cleanup stale submission error: {e}")
-                    # Wipe submission data from current row so UI immediately ignores it
+                    _del_submissions.append(crew_id)
+                    # Wipe submission data from current row immediately
                     for sf in ['s_loco_no', 's_train_no', 'bpc_no', 'cto_time', 'is_relief', 'relief_station', 'relief_datetime']:
                         if sf in row:
                             row[sf] = None
@@ -1380,19 +1366,12 @@ def crew_list():
             row['current_location'] = ''
             src['current_location'] = 'none'
 
-        # Auto-remove location if departure time is after the location update time
+        # Auto-remove location if departure time is after the location update time (deferred)
         if loc_time_dt and row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
             dep_dt = parse_dt(row['departure_time'])
             if dep_dt and dep_dt > loc_time_dt:
-                try:
-                    cleanup_conn = get_db()
-                    cleanup_conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (crew_id,))
-                    cleanup_conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (crew_id,))
-                    cleanup_conn.commit()
-                    cleanup_conn.close()
-                except Exception as e:
-                    print(f"Cleanup location error: {e}")
-                
+                _del_loc_admin.append(crew_id)
+                _null_loc_sub.append(crew_id)
                 row['current_location'] = ''
                 src['current_location'] = 'none'
                 row['_loc_update_time'] = ''
@@ -1429,20 +1408,12 @@ def crew_list():
         else:
             row['_duty_minutes'] = 0
 
-        # Auto-remove stale relief data if relief_datetime is before current sign_on_time
+        # Auto-remove stale relief data if relief_datetime is before current sign_on_time (deferred)
         if sign_on_dt and row.get('relief_datetime') and row['relief_datetime'] not in ['-', '–']:
             relief_dt = parse_dt(row['relief_datetime'])
             if relief_dt and relief_dt < sign_on_dt:
-                try:
-                    cleanup_conn = get_db()
-                    cleanup_conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (crew_id,))
-                    cleanup_conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (crew_id,))
-                    cleanup_conn.commit()
-                    cleanup_conn.close()
-                except Exception as e:
-                    print(f"Cleanup relief error: {e}")
-                
-                # Clear from current row so UI reflects immediately
+                _del_relief_admin.append(crew_id)
+                _null_relief_sub.append(crew_id)
                 row['is_relief'] = 0
                 row['relief_station'] = ''
                 row['relief_datetime'] = ''
@@ -1510,6 +1481,26 @@ def crew_list():
             row['cto_time'] = dt_cto.strftime('%H:%M')
         elif 'cto_time' in row and not row['cto_time']:
             row['cto_time'] = '-'
+
+    # --- Execute all deferred DB cleanup in one batch using the single conn ---
+    try:
+        for cid, field in _del_admin_edits:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
+        for cid in _del_submissions:
+            conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (cid,))
+        for cid in _del_loc_admin:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (cid,))
+        for cid in _null_loc_sub:
+            conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (cid,))
+        for cid in _del_relief_admin:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (cid,))
+        for cid in _null_relief_sub:
+            conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (cid,))
+        conn.commit()
+    except Exception as e:
+        print(f"Deferred cleanup error: {e}")
+    finally:
+        conn.close()
 
     def list_sort_key(r):
         return (r['_sign_on_dt'], r['_cto_dt'])
