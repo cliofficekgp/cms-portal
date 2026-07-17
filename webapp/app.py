@@ -1766,7 +1766,7 @@ def api_sync():
 
             if has_manual_sub:
                 conn.execute('''
-                    UPDATE crew_records SET duty_hrs = ?, sign_off_time = ?, synced_at = ?
+                    UPDATE crew_records SET duty_hrs = ?, sign_off_time = ?, synced_at = ?, is_active = 1
                     WHERE crew_id = ?
                 ''', (rec.get('duty_hrs', ''), rec.get('sign_off_time', '-'), synced_at, crew_id))
                 skipped += 1
@@ -1776,7 +1776,7 @@ def api_sync():
                     SET name=?, desig=?, from_sttn=?, sign_on_time=?,
                         to_sttn=?, sign_off_time=?, duty_hrs=?,
                         route=?, loco_no=?, train_no=?, category=?,
-                        manually_edited=0, synced_at=?
+                        manually_edited=0, synced_at=?, is_active=1
                     WHERE crew_id = ?
                 ''', (
                     rec.get('name',''), rec.get('desig',''), rec.get('from_sttn',''), rec.get('sign_on_time',''),
