@@ -442,10 +442,21 @@ def form():
                 crew_data[field] = sub_dict[field]
 
     # Fetch admin edits to override both CMS records and crew submissions
-    admin_edits = conn.execute('SELECT field, value FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
+    admin_edits = conn.execute('SELECT field, value, updated_at FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
+    
+    sub_dt = None
+    if sub and sub_dict.get('submitted_at'):
+        sub_dt = parse_dt(sub_dict['submitted_at'])
+        
     for edit in admin_edits:
         if edit['value'] is not None and edit['value'].strip() != '':
-            crew_data[edit['field']] = edit['value']
+            if edit['field'] == 'current_location':
+                admin_dt = parse_dt(edit['updated_at'])
+                # Only override current_location if admin edit is newer than latest submission
+                if not sub_dt or (admin_dt and admin_dt >= sub_dt):
+                    crew_data[edit['field']] = edit['value']
+            else:
+                crew_data[edit['field']] = edit['value']
                 
     # Format sign_on_time for display in form (readonly field)
     if crew_data.get('sign_on_time') and crew_data['sign_on_time'] != '-':
@@ -1359,30 +1370,37 @@ def crew_list():
 
         row['_loc_update_time'] = ''
         loc_time_dt = None
-        if 'current_location' in crew_admin_edits and crew_admin_edits['current_location'] is not None:
+        
+        admin_loc = crew_admin_edits.get('current_location')
+        admin_loc_time_str = admin_edits_time_map.get(crew_id, {}).get('current_location', '')
+        admin_loc_dt = parse_dt(admin_loc_time_str) if admin_loc_time_str else None
+
+        sub_loc = row.get('current_location')
+        sub_loc_time_str = row.get('submitted_at', '')
+        sub_loc_dt = parse_dt(sub_loc_time_str) if sub_loc_time_str else None
+
+        if admin_loc and sub_loc and admin_loc_dt and sub_loc_dt:
+            if admin_loc_dt >= sub_loc_dt:
+                src['current_location'] = 'admin'
+                row['current_location'] = admin_loc
+                loc_time_dt = admin_loc_dt
+            else:
+                src['current_location'] = 'sub'
+                loc_time_dt = sub_loc_dt
+        elif admin_loc:
             src['current_location'] = 'admin'
-            row['current_location'] = crew_admin_edits['current_location']
-            loc_time = admin_edits_time_map.get(crew_id, {}).get('current_location', '')
-            if loc_time:
-                dt = parse_dt(loc_time)
-                if dt: 
-                    row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
-                    loc_time_dt = dt
-        elif row.get('current_location'):
-            # Location exists from crew_submission (latest submission wins via MAX(id) in query)
+            row['current_location'] = admin_loc
+            loc_time_dt = admin_loc_dt
+        elif sub_loc:
             src['current_location'] = 'sub'
-            loc_time = row.get('submitted_at', '')
-            if loc_time:
-                dt = parse_dt(loc_time)
-                if dt: 
-                    row['_loc_update_time'] = dt.strftime('%d/%m/%y %H:%M')
-                    loc_time_dt = dt
+            loc_time_dt = sub_loc_dt
         else:
-            # No location from admin edit or crew submission — leave blank
-            # Do NOT fall back to from_sttn: that is CMS sign-on station, not current location.
-            # PDD must not be calculated using an assumed location.
             row['current_location'] = ''
             src['current_location'] = 'none'
+            loc_time_dt = None
+
+        if loc_time_dt:
+            row['_loc_update_time'] = loc_time_dt.strftime('%d/%m/%y %H:%M')
 
         # Auto-remove location if departure time is after the location update time (deferred)
         if loc_time_dt and row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
