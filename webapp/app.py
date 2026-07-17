@@ -440,6 +440,12 @@ def form():
         for field in ['loco_no', 'train_no', 'bpc_no', 'to_sttn', 'cto_time', 'current_location', 'departure_time', 'relief_datetime']:
             if sub_dict.get(field):
                 crew_data[field] = sub_dict[field]
+
+    # Fetch admin edits to override both CMS records and crew submissions
+    admin_edits = conn.execute('SELECT field, value FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
+    for edit in admin_edits:
+        if edit['value'] is not None and edit['value'].strip() != '':
+            crew_data[edit['field']] = edit['value']
                 
     # Format sign_on_time for display in form (readonly field)
     if crew_data.get('sign_on_time') and crew_data['sign_on_time'] != '-':
