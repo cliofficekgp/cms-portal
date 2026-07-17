@@ -1647,7 +1647,8 @@ def api_add_phone():
 def api_crew_lookup(crew_id):
     crew_id = crew_id.strip().upper()
     conn = get_db()
-    # Find latest submission for this crew
+    
+    # 1. Find latest submission for this crew
     sub = conn.execute('''
         SELECT loco_no, train_no, bpc_no 
         FROM crew_submissions 
@@ -1655,23 +1656,36 @@ def api_crew_lookup(crew_id):
         ORDER BY submitted_at DESC LIMIT 1
     ''', (crew_id,)).fetchone()
     
-    if not sub:
+    if sub:
+        result = dict(sub)
+    else:
         # Fallback to crew_records if no submission exists
         rec = conn.execute('''
             SELECT loco_no, train_no, '' as bpc_no 
             FROM crew_records 
             WHERE crew_id = ?
         ''', (crew_id,)).fetchone()
-        sub = rec
+        result = dict(rec) if rec else {'loco_no': '', 'train_no': '', 'bpc_no': ''}
+
+    # 2. Apply any admin overrides
+    admin_edits = conn.execute('''
+        SELECT field, value 
+        FROM admin_edits 
+        WHERE crew_id = ? AND field IN ('loco_no', 'train_no', 'bpc_no')
+    ''', (crew_id,)).fetchall()
+    
+    for edit in admin_edits:
+        if edit['value'] is not None and edit['value'].strip() != '':
+            result[edit['field']] = edit['value']
 
     conn.close()
 
-    if sub:
+    if any(result.values()):
         return jsonify({
             'status': 'ok',
-            'loco_no': sub['loco_no'],
-            'train_no': sub['train_no'],
-            'bpc_no': sub['bpc_no']
+            'loco_no': result.get('loco_no', ''),
+            'train_no': result.get('train_no', ''),
+            'bpc_no': result.get('bpc_no', '')
         })
     else:
         return jsonify({'status': 'not_found'})
