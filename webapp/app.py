@@ -449,37 +449,28 @@ def form():
                 
     # Format sign_on_time for display in form (readonly field)
     if crew_data.get('sign_on_time') and crew_data['sign_on_time'] != '-':
-        try:
-            dt = datetime.strptime(crew_data['sign_on_time'].strip(), '%d-%m-%Y %H:%M')
+        dt = parse_dt(crew_data['sign_on_time'])
+        if dt:
             crew_data['sign_on_time'] = dt.strftime('%d/%m/%y %H:%M')
-        except:
-            pass
 
     # Parse CTO date and time for HTML inputs
     if crew_data.get('cto_time') and crew_data['cto_time'] != '-':
-        try:
-            # CTO time is usually stored as 'DD-MM-YYYY HH:MM'
-            dt = datetime.strptime(crew_data['cto_time'], '%d-%m-%Y %H:%M')
+        dt = parse_dt(crew_data['cto_time'])
+        if dt:
             crew_data['cto_date_val'] = dt.strftime('%Y-%m-%d')
             crew_data['cto_time_val'] = dt.strftime('%H:%M')
-        except:
-            pass
 
     if crew_data.get('departure_time') and crew_data['departure_time'] != '-':
-        try:
-            dt = datetime.strptime(crew_data['departure_time'], '%d-%m-%Y %H:%M')
+        dt = parse_dt(crew_data['departure_time'])
+        if dt:
             crew_data['departure_date_val'] = dt.strftime('%Y-%m-%d')
             crew_data['departure_time_val'] = dt.strftime('%H:%M')
-        except:
-            pass
             
     if crew_data.get('relief_datetime') and crew_data['relief_datetime'] != '-':
-        try:
-            dt = datetime.strptime(crew_data['relief_datetime'], '%d-%m-%Y %H:%M')
+        dt = parse_dt(crew_data['relief_datetime'])
+        if dt:
             crew_data['relief_date_val'] = dt.strftime('%Y-%m-%d')
             crew_data['relief_time_val'] = dt.strftime('%H:%M')
-        except:
-            pass
 
     conn.close()
 
