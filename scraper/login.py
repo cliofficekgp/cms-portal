@@ -85,14 +85,17 @@ API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 
-def is_proxy_available(host=os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1"), port=1080):
-    try:
-        with socket.create_connection((host, port), timeout=1):
-            return True
-    except OSError:
-        return False
-
-USE_PROXY = is_proxy_available()
+def is_proxy_available(host=None, port=1080, retries=5, delay=2):
+    if host is None:
+        host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
+    for attempt in range(retries):
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                return True
+        except OSError:
+            if attempt < retries - 1:
+                time.sleep(delay)
+    return False
 
 def send_state_to_admin(status, message, action_required=False, action_type='', image_base64=''):
     try:
@@ -321,7 +324,7 @@ def main_loop():
             # 1. Try saved cookies
             cookie_valid = False
             session = requests.Session()
-            if USE_PROXY:
+            if is_proxy_available():
                 proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
                 session.proxies = {
                     'http': f'socks5h://{proxy_host}:1080',
@@ -377,7 +380,7 @@ def main_loop():
             options.add_argument("--no-first-run")
             options.add_argument("--safebrowsing-disable-auto-update")
             options.add_argument("--js-flags=--max-old-space-size=256")
-            if USE_PROXY:
+            if is_proxy_available():
                 proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
                 options.add_argument(f'--proxy-server=socks5://{proxy_host}:1080')
 
@@ -616,7 +619,7 @@ def main_loop():
             
             # Sync
             session = requests.Session()
-            if USE_PROXY:
+            if is_proxy_available():
                 proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
                 session.proxies = {
                     'http': f'socks5h://{proxy_host}:1080',
