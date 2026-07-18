@@ -1600,16 +1600,24 @@ def crew_list():
         conn.close()
 
     def list_sort_key(r):
-        return (r['_sign_on_dt'], r['_cto_dt'])
+        return (r['_duty_minutes'], r['_cto_dt'])
 
     data.sort(key=list_sort_key, reverse=True)
+
+    total_signon = len(data)
+    total_10_hrs = sum(1 for r in data if r.get('_duty_minutes', 0) > 600)
+    total_12_hrs = sum(1 for r in data if r.get('_duty_minutes', 0) > 720)
 
     # Clean up the internal sort-only keys so they don't leak into the template unnecessarily
     for row in data:
         row.pop('_sign_on_dt', None)
         row.pop('_cto_dt', None)
 
-    return render_template('crew_list.html', crew_list=data)
+    return render_template('crew_list.html', 
+                           crew_list=data,
+                           total_signon=total_signon,
+                           total_10_hrs=total_10_hrs,
+                           total_12_hrs=total_12_hrs)
 
 @app.route('/api/save_ns_status', methods=['POST'])
 @login_required

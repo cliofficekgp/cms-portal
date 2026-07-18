@@ -282,6 +282,12 @@
                 <span class="legend-dot dot-red"></span> High Duty
             </span>
             <span class="legend-item"><span class="legend-dot dot-green"></span> Low Duty</span>
+            
+            <span style="margin-left:16px;border-left:1px solid #334155;padding-left:16px;display:flex;gap:12px;align-items:center;">
+                <span style="font-size:11px;font-weight:600;color:#93c5fd;letter-spacing:0.02em;">TOTAL ACTIVE: <span style="color:#fff;font-size:12px;">{{ total_signon }}</span></span>
+                <span style="font-size:11px;font-weight:600;color:#fca5a5;letter-spacing:0.02em;">>10 HRS: <span style="color:#fff;font-size:12px;">{{ total_10_hrs }}</span></span>
+                <span style="font-size:11px;font-weight:600;color:#ef4444;letter-spacing:0.02em;">>12 HRS: <span style="color:#fff;font-size:12px;">{{ total_12_hrs }}</span></span>
+            </span>
         </div>
         <button onclick="exportTableToCSV('crew_list.csv')" class="btn-export">
             <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
