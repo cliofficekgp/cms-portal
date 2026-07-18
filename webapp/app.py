@@ -1372,27 +1372,32 @@ def crew_list():
         loc_time_dt = None
         
         admin_loc = crew_admin_edits.get('current_location')
+        has_admin_loc = 'current_location' in crew_admin_edits
         admin_loc_time_str = admin_edits_time_map.get(crew_id, {}).get('current_location', '')
         admin_loc_dt = parse_dt(admin_loc_time_str) if admin_loc_time_str else None
 
         sub_loc = row.get('current_location')
+        has_sub_loc = sub_loc is not None
         sub_loc_time_str = row.get('submitted_at', '')
         sub_loc_dt = parse_dt(sub_loc_time_str) if sub_loc_time_str else None
 
-        if admin_loc and sub_loc and admin_loc_dt and sub_loc_dt:
+        if has_admin_loc and has_sub_loc and admin_loc_dt and sub_loc_dt:
             if admin_loc_dt >= sub_loc_dt:
                 src['current_location'] = 'admin'
                 row['current_location'] = admin_loc
                 loc_time_dt = admin_loc_dt
             else:
                 src['current_location'] = 'sub'
+                # row['current_location'] already has sub_loc from SQL COALESCE, but we explicitly set it:
+                row['current_location'] = sub_loc
                 loc_time_dt = sub_loc_dt
-        elif admin_loc:
+        elif has_admin_loc:
             src['current_location'] = 'admin'
             row['current_location'] = admin_loc
             loc_time_dt = admin_loc_dt
-        elif sub_loc:
+        elif has_sub_loc:
             src['current_location'] = 'sub'
+            row['current_location'] = sub_loc
             loc_time_dt = sub_loc_dt
         else:
             row['current_location'] = ''
@@ -1401,6 +1406,44 @@ def crew_list():
 
         if loc_time_dt:
             row['_loc_update_time'] = loc_time_dt.strftime('%d/%m/%y %H:%M')
+
+        # Check for frozen_pdd from admin_edits FIRST
+        frozen_pdd = crew_admin_edits.get('frozen_pdd')
+        if frozen_pdd:
+            row['pdd'] = frozen_pdd
+            # if frozen_pdd is set, we don't recalculate it dynamically below.
+            is_frozen = True
+        else:
+            row['pdd'] = '-'
+            is_frozen = False
+            
+        if not is_frozen:
+            # Calculate PDD dynamically based on current state
+            lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
+            from_sttn = (row.get('from_sttn', '') or '').upper().strip()
+            cto_sttn = (row.get('current_location', '') or '').upper().strip()
+            
+            # Normalize NPTY to NMP for comparison
+            from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
+            cto_sttn_norm = 'NMP' if cto_sttn == 'NPTY' else cto_sttn
+
+            is_pdd_sttn = False
+            if sign_on_dt:
+                # Check special case: sign on in {NMP, KGP} and CTO in {NMP, KGP} (using normalized stations)
+                if from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
+                    is_pdd_sttn = True
+                # Otherwise, check if sign on station is in standard lobbies and equals the CTO station
+                elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
+                    is_pdd_sttn = True
+
+            if is_pdd_sttn:
+                departure_dt = parse_dt(row.get('departure_time'))
+                end_time = departure_dt if departure_dt else now
+                pdd_delta = end_time - sign_on_dt
+                if pdd_delta.total_seconds() > 0:
+                    p_hours = int(pdd_delta.total_seconds() // 3600)
+                    p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
+                    row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
 
         # Auto-remove location if departure time is after the location update time (deferred)
         if loc_time_dt and row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
@@ -1456,34 +1499,6 @@ def crew_list():
                 src['is_relief'] = 'none'
                 src['relief_station'] = 'none'
                 src['relief_datetime'] = 'none'
-
-        # Calculate PDD
-        row['pdd'] = '-'
-        lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
-        from_sttn = (row.get('from_sttn', '') or '').upper().strip()
-        cto_sttn = (row.get('current_location', '') or '').upper().strip()
-        
-        # Normalize NPTY to NMP for comparison
-        from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
-        cto_sttn_norm = 'NMP' if cto_sttn == 'NPTY' else cto_sttn
-
-        is_pdd_sttn = False
-        if sign_on_dt:
-            # Check special case: sign on in {NMP, KGP} and CTO in {NMP, KGP} (using normalized stations)
-            if from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
-                is_pdd_sttn = True
-            # Otherwise, check if sign on station is in standard lobbies and equals the CTO station
-            elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
-                is_pdd_sttn = True
-
-        if is_pdd_sttn:
-            departure_dt = parse_dt(row.get('departure_time'))
-            end_time = departure_dt if departure_dt else now
-            pdd_delta = end_time - sign_on_dt
-            if pdd_delta.total_seconds() > 0:
-                p_hours = int(pdd_delta.total_seconds() // 3600)
-                p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
-                row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
 
         # Capture raw datetimes for sorting BEFORE display formatting overwrites the strings
         row['_sign_on_dt'] = sign_on_dt if sign_on_dt else datetime.min.replace(tzinfo=IST)
@@ -1572,6 +1587,78 @@ def save_ns_status():
     return jsonify({'status': 'ok'})
 
 
+def compute_frozen_pdd(crew_id, conn):
+    r = conn.execute('''
+        SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time,
+               COALESCE(s.from_sttn, r.from_sttn) as from_sttn,
+               s.current_location as sub_loc,
+               s.submitted_at as sub_time,
+               COALESCE(s.departure_time, '') as departure_time
+        FROM crew_records r
+        LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id
+        WHERE r.crew_id = ?
+        ORDER BY s.id DESC LIMIT 1
+    ''', (crew_id,)).fetchone()
+    
+    if not r: return None
+    row = dict(r)
+    
+    admin_edits = conn.execute('SELECT field, value, updated_at FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
+    admin = {e['field']: e for e in admin_edits}
+    
+    sign_on_dt = parse_dt(row['sign_on_time']) if row.get('sign_on_time') else None
+    if not sign_on_dt: return None
+    
+    from_sttn = row.get('from_sttn', '').upper().strip()
+    
+    admin_loc_data = admin.get('current_location')
+    sub_loc = row.get('sub_loc')
+    sub_time = row.get('sub_time')
+    
+    curr_loc = ''
+    if admin_loc_data and sub_loc:
+        adt = parse_dt(admin_loc_data['updated_at'])
+        sdt = parse_dt(sub_time)
+        if adt and sdt and adt >= sdt:
+            curr_loc = admin_loc_data['value']
+        else:
+            curr_loc = sub_loc
+    elif admin_loc_data:
+        curr_loc = admin_loc_data['value']
+    elif sub_loc:
+        curr_loc = sub_loc
+        
+    curr_loc = curr_loc.upper().strip()
+    
+    dep_time = admin.get('departure_time', {}).get('value', row.get('departure_time', ''))
+    dep_dt = parse_dt(dep_time)
+    
+    lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
+    from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
+    cto_sttn_norm = 'NMP' if curr_loc == 'NPTY' else curr_loc
+    
+    is_pdd_sttn = False
+    if from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
+        is_pdd_sttn = True
+    elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
+        is_pdd_sttn = True
+        
+    if is_pdd_sttn:
+        now = datetime.now(IST).replace(tzinfo=None)
+        if sign_on_dt.tzinfo:
+            sign_on_dt = sign_on_dt.replace(tzinfo=None)
+        if dep_dt and dep_dt.tzinfo:
+            dep_dt = dep_dt.replace(tzinfo=None)
+            
+        end_time = dep_dt if dep_dt else now
+        pdd_delta = end_time - sign_on_dt
+        if pdd_delta.total_seconds() > 0:
+            p_hours = int(pdd_delta.total_seconds() // 3600)
+            p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
+            return f"{p_hours:02d}:{p_minutes:02d}"
+            
+    return None
+
 @app.route('/api/admin_edit', methods=['POST'])
 @login_required
 def api_admin_edit():
@@ -1590,6 +1677,20 @@ def api_admin_edit():
         return jsonify({'status': 'error', 'message': 'Invalid field or crew_id'}), 400
 
     conn = get_db()
+
+    # If location is explicitly being removed, freeze the PDD calculation BEFORE saving
+    if field == 'current_location':
+        if value == '':
+            frozen = compute_frozen_pdd(crew_id, conn)
+            if frozen:
+                updated_at_pdd = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+                conn.execute('''
+                    INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                    VALUES (?, 'frozen_pdd', ?, ?)
+                    ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                ''', (crew_id, frozen, updated_at_pdd))
+        else:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'frozen_pdd'", (crew_id,))
 
     if field in ('cto_time', 'departure_time') and value and value not in ['-', '–']:
         # Construct full datetime from sign_on_time + submitted time
