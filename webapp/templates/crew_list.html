@@ -71,6 +71,30 @@
         }
         .btn-export:hover { background: #2563eb; color: #fff; }
 
+        /* ── LOBBY FILTER BAR ── */
+        .lobby-bar {
+            background: #162032; padding: 5px 16px;
+            display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+            border-bottom: 1px solid #253350; flex-wrap: wrap;
+        }
+        .lobby-bar-label { font-size: 10px; font-weight: 700; color: #64748b; letter-spacing: 0.06em; white-space: nowrap; }
+        .lobby-chip {
+            font-size: 11px; font-weight: 600; padding: 3px 10px;
+            border-radius: 20px; cursor: pointer; user-select: none;
+            border: 1.5px solid #334155; color: #94a3b8; background: transparent;
+            transition: all 0.18s; white-space: nowrap;
+        }
+        .lobby-chip:hover { border-color: #60a5fa; color: #e2e8f0; }
+        .lobby-chip.active { border-color: #3b82f6; background: rgba(59,130,246,0.18); color: #93c5fd; }
+        .lobby-chip-all.active { border-color: #22c55e; background: rgba(34,197,94,0.15); color: #86efac; }
+        .lobby-chip-kgp.active  { border-color: #818cf8; background: rgba(129,140,248,0.18); color: #c7d2fe; }
+        .lobby-chip-nmp.active  { border-color: #fb923c; background: rgba(251,146,60,0.18); color: #fed7aa; }
+        .lobby-chip-bls.active  { border-color: #2dd4bf; background: rgba(45,212,191,0.18); color: #99f6e4; }
+        .lobby-chip-gts.active  { border-color: #f472b6; background: rgba(244,114,182,0.18); color: #fbcfe8; }
+        .lobby-chip-adl.active  { border-color: #a3e635; background: rgba(163,230,53,0.18); color: #d9f99d; }
+        .lobby-chip-src.active  { border-color: #fbbf24; background: rgba(251,191,36,0.18); color: #fde68a; }
+        .lobby-chip-tpkr.active { border-color: #f87171; background: rgba(248,113,113,0.18); color: #fecaca; }
+
         /* ── TABLE ── */
         .table-wrap { overflow: auto; flex: 1; }
         table { width: 100%; border-collapse: collapse; }
@@ -297,6 +321,19 @@
         </button>
     </div>
 
+    <!-- LOBBY FILTER BAR -->
+    <div class="lobby-bar" id="lobbyBar">
+        <span class="lobby-bar-label">LOBBY:</span>
+        <button class="lobby-chip lobby-chip-all active" data-lobby="ALL" id="chip-ALL">All</button>
+        <button class="lobby-chip lobby-chip-kgp"  data-lobby="KGP"  id="chip-KGP">KGP</button>
+        <button class="lobby-chip lobby-chip-nmp"  data-lobby="NMP"  id="chip-NMP">NMP</button>
+        <button class="lobby-chip lobby-chip-bls"  data-lobby="BLS"  id="chip-BLS">BLS</button>
+        <button class="lobby-chip lobby-chip-gts"  data-lobby="GTS"  id="chip-GTS">GTS</button>
+        <button class="lobby-chip lobby-chip-adl"  data-lobby="ADL"  id="chip-ADL">ADL</button>
+        <button class="lobby-chip lobby-chip-src"  data-lobby="SRC"  id="chip-SRC">SRC</button>
+        <button class="lobby-chip lobby-chip-tpkr" data-lobby="TPKR" id="chip-TPKR">TPKR</button>
+    </div>
+
     <!-- TABLE -->
     <div class="table-wrap">
         <table id="crewTable">
@@ -324,9 +361,12 @@
             <tbody id="tableBody">
                 {% for crew in crew_list %}
                 {% set src = crew._src %}
+                {# Derive lobby prefix from crew_id for client-side filtering #}
+                {%- set lobby_prefix = crew.crew_id[:4] if crew.crew_id|length >= 4 and crew.crew_id[:4] == 'TPKR' else crew.crew_id[:3] -%}
                 {% set base_class = 'row-miss' if crew.ingest_miss_count >= 3 else ('row-relief' if crew.is_relief == 1 else '') %}
                 <tr class="{{ 'row-ns' if crew.found_in_ns == 'yes' else base_class }}"
-                    data-crew="{{ crew.crew_id }}">
+                    data-crew="{{ crew.crew_id }}"
+                    data-lobby="{{ lobby_prefix }}">
 
                     <!-- Crew ID -->
                     <td class="crew-id-cell">{{ crew.crew_id }}</td>
@@ -880,15 +920,80 @@ document.querySelectorAll('th[data-col]').forEach(th => {
 });
 
 /* ================================================================
-   SEARCH
+   LOBBY FILTER
    ================================================================ */
-document.getElementById('searchInput').addEventListener('input', function () {
-    const f = this.value.toLowerCase();
-    document.querySelectorAll('#tableBody tr').forEach(row => {
-        if (row.classList.contains('empty-row')) return;
-        row.style.display = row.innerText.toLowerCase().includes(f) ? '' : 'none';
+const LOBBY_STORAGE_KEY = 'cms_lobby_filter_v1';
+const ALL_LOBBIES = ['KGP','NMP','BLS','GTS','ADL','SRC','TPKR'];
+
+let selectedLobbies = new Set();
+
+(function initLobbyFilter() {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(LOBBY_STORAGE_KEY) || '[]'); } catch(e) {}
+    if (!Array.isArray(saved) || saved.length === 0) {
+        // Default: ALL selected
+        selectedLobbies = new Set(['ALL']);
+    } else {
+        selectedLobbies = new Set(saved);
+    }
+    renderChips();
+})();
+
+function renderChips() {
+    const isAll = selectedLobbies.has('ALL');
+    document.querySelectorAll('.lobby-chip').forEach(chip => {
+        const l = chip.dataset.lobby;
+        if (l === 'ALL') {
+            chip.classList.toggle('active', isAll);
+        } else {
+            chip.classList.toggle('active', !isAll && selectedLobbies.has(l));
+        }
+    });
+}
+
+function persistLobbies() {
+    const arr = selectedLobbies.has('ALL') ? ['ALL'] : Array.from(selectedLobbies);
+    localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify(arr));
+}
+
+document.querySelectorAll('.lobby-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        const l = chip.dataset.lobby;
+        if (l === 'ALL') {
+            selectedLobbies = new Set(['ALL']);
+        } else {
+            selectedLobbies.delete('ALL');
+            if (selectedLobbies.has(l)) {
+                selectedLobbies.delete(l);
+                if (selectedLobbies.size === 0) selectedLobbies.add('ALL');
+            } else {
+                selectedLobbies.add(l);
+            }
+        }
+        renderChips();
+        persistLobbies();
+        applyFilters();
     });
 });
+
+/* ================================================================
+   SEARCH
+   ================================================================ */
+document.getElementById('searchInput').addEventListener('input', applyFilters);
+
+function applyFilters() {
+    const searchText = document.getElementById('searchInput').value.toLowerCase();
+    const isAll = selectedLobbies.has('ALL');
+    document.querySelectorAll('#tableBody tr').forEach(row => {
+        if (row.classList.contains('empty-row')) return;
+        const lobbyMatch = isAll || selectedLobbies.has(row.dataset.lobby);
+        const searchMatch = !searchText || row.innerText.toLowerCase().includes(searchText);
+        row.style.display = (lobbyMatch && searchMatch) ? '' : 'none';
+    });
+}
+
+// Apply filters on page load to respect persisted state
+applyFilters();
 
 /* ================================================================
    EXPORT CSV
