@@ -1299,6 +1299,7 @@ def crew_list():
     _del_submissions    = []   # crew_id
     _del_loc_admin      = []   # crew_id
     _null_loc_sub       = []   # crew_id
+    _freeze_pdd         = []   # (crew_id, pdd_val)
     _del_relief_admin   = []   # crew_id
     _null_relief_sub    = []   # crew_id
     
@@ -1445,15 +1446,42 @@ def crew_list():
                     p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
                     row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
 
-        # Auto-remove location if departure time is after the location update time (deferred)
-        if loc_time_dt and row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
+        # Auto-remove location based on departure time (deferred)
+        if row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
             dep_dt = parse_dt(row['departure_time'])
-            if dep_dt and dep_dt > loc_time_dt:
-                _del_loc_admin.append(crew_id)
-                _null_loc_sub.append(crew_id)
-                row['current_location'] = ''
-                src['current_location'] = 'none'
-                row['_loc_update_time'] = ''
+            if dep_dt:
+                if not loc_time_dt or dep_dt > loc_time_dt:
+                    # Case A: Location hasn't been updated recently (or is blank).
+                    _del_loc_admin.append(crew_id)
+                    _null_loc_sub.append(crew_id)
+                    if row.get('pdd') and row['pdd'] != '-':
+                        _freeze_pdd.append((crew_id, row['pdd']))
+                    row['current_location'] = ''
+                    src['current_location'] = 'none'
+                    row['_loc_update_time'] = dep_dt.strftime('%d/%m/%y %H:%M')
+                elif dep_dt <= loc_time_dt:
+                    # Case B: Location updated AFTER departure time.
+                    # Keep location UNLESS it's the sign-on station.
+                    lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
+                    from_sttn = (row.get('from_sttn', '') or '').upper().strip()
+                    curr_loc = (row.get('current_location', '') or '').upper().strip()
+                    from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
+                    curr_loc_norm = 'NMP' if curr_loc == 'NPTY' else curr_loc
+                    
+                    is_sign_on = False
+                    if from_sttn_norm in {'NMP', 'KGP'} and curr_loc_norm in {'NMP', 'KGP'}:
+                        is_sign_on = True
+                    elif from_sttn_norm in lobbies and from_sttn_norm == curr_loc_norm:
+                        is_sign_on = True
+                        
+                    if is_sign_on:
+                        _del_loc_admin.append(crew_id)
+                        _null_loc_sub.append(crew_id)
+                        if row.get('pdd') and row['pdd'] != '-':
+                            _freeze_pdd.append((crew_id, row['pdd']))
+                        row['current_location'] = ''
+                        src['current_location'] = 'none'
+                        row['_loc_update_time'] = dep_dt.strftime('%d/%m/%y %H:%M')
 
         for field in ['relief_station', 'relief_datetime']:
             if field in crew_admin_edits and crew_admin_edits[field] is not None:
@@ -1542,6 +1570,14 @@ def crew_list():
 
     # --- Execute all deferred DB cleanup in one batch using the single conn ---
     try:
+        updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+        for cid, pdd_val in _freeze_pdd:
+            conn.execute('''
+                INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                VALUES (?, 'frozen_pdd', ?, ?)
+                ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+            ''', (cid, pdd_val, updated_at_freeze))
+            
         for cid, field in _del_admin_edits:
             conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
         for cid in _del_submissions:
