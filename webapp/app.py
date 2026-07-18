@@ -1550,7 +1550,7 @@ def crew_list():
                 row['ordering_time'] = '-'
 
         # Format dates universally (DD/MM/YY HH:MM) — happens AFTER capturing sort keys above
-        for col in ['sign_on_time', 'relief_datetime']:
+        for col in ['sign_on_time']:
             dt = parse_dt(row.get(col, ''))
             if dt:
                 row[col] = dt.strftime('%d/%m/%y %H:%M')
@@ -1570,6 +1570,13 @@ def crew_list():
             row['departure_time'] = dt_dep.strftime('%H:%M')
         elif 'departure_time' in row and not row['departure_time']:
             row['departure_time'] = '-'
+            
+        # Format relief_datetime as time only
+        dt_relief = parse_dt(row.get('relief_datetime', ''))
+        if dt_relief:
+            row['relief_datetime'] = dt_relief.strftime('%H:%M')
+        elif 'relief_datetime' in row and not row['relief_datetime']:
+            row['relief_datetime'] = '-'
 
     # --- Execute all deferred DB cleanup in one batch using the single conn ---
     try:
@@ -1739,7 +1746,7 @@ def api_admin_edit():
         else:
             conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'frozen_pdd'", (crew_id,))
 
-    if field in ('cto_time', 'departure_time') and value and value not in ['-', '–']:
+    if field in ('cto_time', 'departure_time', 'relief_datetime') and value and value not in ['-', '–']:
         # Construct full datetime from sign_on_time + submitted time
         r = conn.execute('''
             SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time 
