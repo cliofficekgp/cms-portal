@@ -6,6 +6,9 @@ import threading
 import subprocess
 import csv
 from datetime import datetime, timedelta
+import _strptime  # Fix for known thread-safety bug with strptime lazily loading in python
+# Force initialization of the _strptime module
+datetime.strptime("2020", "%Y")
 from zoneinfo import ZoneInfo
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
