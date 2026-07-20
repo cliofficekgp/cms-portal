@@ -348,7 +348,7 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             return redirect(url_for('admin_login'))
-        if session.get('force_password_change'):
+        if session.get('force_password_change') and request.endpoint != 'admin_change_password':
             return redirect(url_for('admin_change_password'))
         return f(*args, **kwargs)
     return decorated_function
@@ -360,7 +360,7 @@ def super_admin_required(f):
             return redirect(url_for('admin_login'))
         if session.get('role') != 'super_admin':
             return "Unauthorized. Super Admin access required.", 403
-        if session.get('force_password_change'):
+        if session.get('force_password_change') and request.endpoint != 'admin_change_password':
             return redirect(url_for('admin_change_password'))
         return f(*args, **kwargs)
     return decorated_function
