@@ -1944,6 +1944,8 @@ def api_sync():
             if is_new_shift:
                 conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
                 conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
+                # Reset found_in_ns so old duty's NS check doesn't carry over to new duty
+                conn.execute("UPDATE crew_records SET found_in_ns = 'no' WHERE crew_id = ?", (crew_id,))
                 has_manual_sub = False
             else:
                 has_manual_sub = bool(sub)

@@ -538,13 +538,28 @@
           }
         });
         
-        // Lock CTO Location
+        // Lock CTO Location — remove required and fill with relief_station if blank
         if (locInputContainer) locInputContainer.style.display = 'none';
         if (readonlyCto) readonlyCto.style.display = 'block';
-
+        locInput.required = false;
+        
         // Restore previous location
-        locInput.value = "{{ crew.current_location if crew and crew.current_location else '' }}";
-
+        const prevLoc = "{{ crew.current_location if crew and crew.current_location else '' }}";
+        if (prevLoc) {
+          locInput.value = prevLoc;
+        } else {
+          // No previous location: auto-fill with relief station once user enters it
+          const reliefStnInput = document.getElementById('relief_station');
+          if (reliefStnInput && reliefStnInput.value) {
+            locInput.value = reliefStnInput.value;
+          } else {
+            // Watch for relief station changes and mirror to current_location
+            reliefStnInput.addEventListener('input', function _mirrorRelief() {
+              if (!locInput.value) locInput.value = reliefStnInput.value;
+            });
+          }
+        }
+        
         // Auto populate relief time
         const n = new Date();
         const tz = n.getTimezoneOffset() * 60000;
@@ -565,6 +580,10 @@
         });
         document.querySelector('input[name="from_sttn"]').required = false;
         document.querySelector('input[name="train_no"]').required = true;
+        
+        // Restore required on current_location
+        locInput.required = true;
+        if (!locInput.value.trim()) locInput.classList.add('mandatory-highlight');
 
         // Unlock CTO Location
         if (readonlyCto) readonlyCto.style.display = 'none';
