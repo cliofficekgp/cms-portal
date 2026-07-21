@@ -1774,6 +1774,61 @@ def api_admin_edit():
         VALUES (?, ?, ?, ?)
         ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
     ''', (crew_id, field, value, updated_at))
+
+    # Auto-clear location and freeze PDD if departure_time is entered and is >= last loc update
+    if field == 'departure_time' and value and value not in ['-', '–']:
+        loc_row = conn.execute('''
+            SELECT COALESCE(s.current_location, '') as sub_loc,
+                   s.submitted_at as sub_time,
+                   a.value as admin_loc,
+                   a.updated_at as admin_loc_time
+            FROM crew_records r
+            LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id
+            LEFT JOIN admin_edits a ON r.crew_id = a.crew_id AND a.field = 'current_location'
+            WHERE r.crew_id = ?
+            ORDER BY s.id DESC LIMIT 1
+        ''', (crew_id,)).fetchone()
+
+        if loc_row:
+            admin_loc_time_str = loc_row['admin_loc_time']
+            admin_loc_dt = parse_dt(admin_loc_time_str) if admin_loc_time_str else None
+            sub_loc_time_str = loc_row['sub_time']
+            sub_loc_dt = parse_dt(sub_loc_time_str) if sub_loc_time_str else None
+
+            active_loc = ''
+            loc_time_dt = None
+            if admin_loc_dt and sub_loc_dt:
+                if admin_loc_dt >= sub_loc_dt:
+                    active_loc = loc_row['admin_loc']
+                    loc_time_dt = admin_loc_dt
+                else:
+                    active_loc = loc_row['sub_loc']
+                    loc_time_dt = sub_loc_dt
+            elif admin_loc_dt:
+                active_loc = loc_row['admin_loc']
+                loc_time_dt = admin_loc_dt
+            elif sub_loc_dt:
+                active_loc = loc_row['sub_loc']
+                loc_time_dt = sub_loc_dt
+
+            new_dep_dt = parse_dt(value)
+            if active_loc and new_dep_dt and loc_time_dt and new_dep_dt >= loc_time_dt:
+                # Freeze PDD using current location and new departure time (already saved above)
+                frozen = compute_frozen_pdd(crew_id, conn)
+                if frozen:
+                    conn.execute('''
+                        INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                        VALUES (?, 'frozen_pdd', ?, ?)
+                        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                    ''', (crew_id, frozen, updated_at))
+                
+                # Clear the location
+                conn.execute('''
+                    INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                    VALUES (?, 'current_location', '', ?)
+                    ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                ''', (crew_id, updated_at))
+
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})
