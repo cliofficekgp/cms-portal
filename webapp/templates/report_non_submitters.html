@@ -117,9 +117,9 @@
               <th class="px-4 py-3 text-left">Crew ID</th>
               <th class="px-4 py-3 text-left">Name</th>
               <th class="px-4 py-3 text-left">Designation</th>
-              <th class="px-4 py-3 text-left">Category</th>
-              <th class="px-4 py-3 text-left">From Station</th>
-              <th class="px-4 py-3 text-left">Sign-On Time (CMS)</th>
+              <th class="px-4 py-3 text-center">Total Duties</th>
+              <th class="px-4 py-3 text-center">Submitted</th>
+              <th class="px-4 py-3 text-center">Missing</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
@@ -129,9 +129,9 @@
               <td class="px-4 py-3 font-semibold text-rose-700 font-mono">{{ row.crew_id }}</td>
               <td class="px-4 py-3 text-gray-800">{{ row.name }}</td>
               <td class="px-4 py-3 text-gray-600">{{ row.desig }}</td>
-              <td class="px-4 py-3 text-gray-600">{{ row.category }}</td>
-              <td class="px-4 py-3 font-medium text-gray-800">{{ row.from_sttn }}</td>
-              <td class="px-4 py-3 font-mono text-gray-600">{{ row.sign_on_time }}</td>
+              <td class="px-4 py-3 text-center font-medium text-gray-800">{{ row.total_duties }}</td>
+              <td class="px-4 py-3 text-center text-emerald-600 font-medium">{{ row.submitted }}</td>
+              <td class="px-4 py-3 text-center text-rose-600 font-bold">{{ row.not_submitted }}</td>
             </tr>
             {% endfor %}
           </tbody>

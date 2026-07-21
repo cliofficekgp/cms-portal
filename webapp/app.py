@@ -276,6 +276,26 @@ def init_db():
             is_used INTEGER DEFAULT 0
         )
     ''')
+
+    # crew_duty_log: append-only archive of every duty cycle (one row per duty per crew)
+    # Kept for 30 days; enables monthly non-submitter reports even after active records are recycled
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS crew_duty_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            crew_id         TEXT NOT NULL,
+            name            TEXT,
+            desig           TEXT,
+            from_sttn       TEXT,
+            sign_on_time    TEXT,
+            sign_off_time   TEXT,
+            duty_hrs        TEXT,
+            category        TEXT,
+            has_submission  INTEGER DEFAULT 0,
+            created_at      TEXT
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_duty_log_crew_id ON crew_duty_log (crew_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_duty_log_sign_on ON crew_duty_log (sign_on_time)')
     
     # Bootstrap default super_admin if no users exist
     user_count = cur.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -301,8 +321,9 @@ def run_cleanup_thread():
             print("[Thread] Running cleanup job...")
             conn = get_db()
             cutoff = datetime.now(IST) - timedelta(days=30)
+            cutoff_str = cutoff.strftime('%d-%m-%Y %H:%M')
             
-            # Clean crew_submissions
+            # Clean crew_submissions older than 30 days
             subs = conn.execute('SELECT id, sign_on_time FROM crew_submissions').fetchall()
             for row in subs:
                 try:
@@ -311,13 +332,26 @@ def run_cleanup_thread():
                         conn.execute('DELETE FROM crew_submissions WHERE id = ?', (row['id'],))
                 except: pass
             
-            # Clean crew_records
-            recs = conn.execute('SELECT crew_id, sign_on_time FROM crew_records').fetchall()
+            # Clean crew_records: only hard-delete rows that are soft-deleted (is_active=0)
+            # and whose sign_on_time is older than 30 days.
+            # Active records (is_active=1) are NEVER deleted by the cleanup thread.
+            recs = conn.execute('SELECT crew_id, sign_on_time, is_active FROM crew_records').fetchall()
             for row in recs:
+                if row['is_active'] == 1:
+                    continue  # Never touch active records
                 try:
                     dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
                     if dt < cutoff:
                         conn.execute('DELETE FROM crew_records WHERE crew_id = ?', (row['crew_id'],))
+                except: pass
+            
+            # Clean crew_duty_log entries older than 30 days
+            logs = conn.execute('SELECT id, sign_on_time FROM crew_duty_log').fetchall()
+            for row in logs:
+                try:
+                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
+                    if dt < cutoff:
+                        conn.execute('DELETE FROM crew_duty_log WHERE id = ?', (row['id'],))
                 except: pass
             
             conn.commit()
@@ -379,6 +413,50 @@ def sign_on_match(existing_dt_str, incoming_dt_str, tolerance_minutes=60):
     incoming = parse_sign_on_dt(incoming_dt_str)
     if existing is None or incoming is None: return False
     return abs((existing - incoming).total_seconds()) <= tolerance_minutes * 60
+
+def archive_to_duty_log(conn, crew_id, has_submission=None):
+    """Archive the current crew_records row for a crew_id into crew_duty_log.
+    
+    If has_submission is None, auto-detect by checking crew_submissions table.
+    Call this BEFORE overwriting or soft-deleting a crew_records row.
+    """
+    rec = conn.execute(
+        'SELECT crew_id, name, desig, from_sttn, sign_on_time, sign_off_time, duty_hrs, category FROM crew_records WHERE crew_id = ?',
+        (crew_id,)
+    ).fetchone()
+    if not rec:
+        return
+    
+    if has_submission is None:
+        sub = conn.execute('SELECT id FROM crew_submissions WHERE crew_id = ?', (crew_id,)).fetchone()
+        has_submission = 1 if sub else 0
+    
+    # Avoid duplicate log entries for the exact same duty (same crew_id + sign_on_time)
+    sign_on = rec['sign_on_time'] or ''
+    if sign_on:
+        dup = conn.execute(
+            'SELECT id FROM crew_duty_log WHERE crew_id = ? AND sign_on_time = ?',
+            (crew_id, sign_on)
+        ).fetchone()
+        if dup:
+            # Update the has_submission flag in case it changed
+            if has_submission:
+                conn.execute(
+                    'UPDATE crew_duty_log SET has_submission = 1 WHERE id = ?',
+                    (dup['id'],)
+                )
+            return
+
+    created_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+    conn.execute('''
+        INSERT INTO crew_duty_log
+            (crew_id, name, desig, from_sttn, sign_on_time, sign_off_time, duty_hrs, category, has_submission, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        rec['crew_id'], rec['name'], rec['desig'], rec['from_sttn'],
+        rec['sign_on_time'], rec['sign_off_time'], rec['duty_hrs'],
+        rec['category'], has_submission, created_at
+    ))
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -613,6 +691,11 @@ def submit():
                 '-', '', '', loco_no, train_no,
                 'MANUAL', 1, submitted_at
             ))
+
+    # Mark crew_duty_log entry as has_submission for both this crew and the handover crew
+    archive_to_duty_log(conn, crew_id, has_submission=1)
+    if is_relief and handover_id:
+        archive_to_duty_log(conn, handover_id, has_submission=1)
 
     conn.commit()
     conn.close()
@@ -1038,45 +1121,69 @@ def report_non_submitters():
         to_date_str   = to_dt.strftime('%Y-%m-%d')
 
     conn = get_db()
-    records  = conn.execute(
-        'SELECT crew_id, name, desig, from_sttn, sign_on_time, category FROM crew_records'
-    ).fetchall()
-    subs_all = conn.execute('SELECT crew_id, submitted_at FROM crew_submissions').fetchall()
+    logs = conn.execute('SELECT crew_id, name, desig, from_sttn, sign_on_time, category, has_submission FROM crew_duty_log').fetchall()
+    
+    # Active records
+    recs = conn.execute('''
+        SELECT r.crew_id, r.name, r.desig, r.from_sttn, r.sign_on_time, r.category,
+               (SELECT COUNT(id) FROM crew_submissions s WHERE s.crew_id = r.crew_id LIMIT 1) as has_submission
+        FROM crew_records r WHERE r.is_active = 1
+    ''').fetchall()
     conn.close()
 
-    # Crew IDs that have at least one submission within the date range
-    submitted_ids = set()
-    for row in subs_all:
-        dt = _parse_dt_report(row['submitted_at'])
-        if dt and from_dt <= dt <= to_dt:
-            submitted_ids.add(row['crew_id'])
-
-    # Crew that signed on in range but never submitted
-    non_submitters = []
-    for row in records:
+    duty_map = {} # (crew_id, sign_on_dt_str) -> dict
+    
+    def process_row(row):
         sign_on_dt = _parse_dt_report(row['sign_on_time'])
         if sign_on_dt and from_dt <= sign_on_dt <= to_dt:
-            if row['crew_id'] not in submitted_ids:
-                non_submitters.append({
-                    'crew_id':      row['crew_id'],
-                    'name':         row['name'] or '',
-                    'desig':        row['desig'] or '',
-                    'from_sttn':    row['from_sttn'] or '',
-                    'sign_on_time': sign_on_dt.strftime('%d/%m/%y %H:%M'),
-                    'category':     row['category'] or '',
-                })
+            key = (row['crew_id'], row['sign_on_time'])
+            if key not in duty_map:
+                duty_map[key] = {
+                    'crew_id': row['crew_id'],
+                    'name': row['name'] or '',
+                    'desig': row['desig'] or '',
+                    'has_submission': bool(row['has_submission'])
+                }
+            else:
+                # If either has submission, it's submitted
+                duty_map[key]['has_submission'] = duty_map[key]['has_submission'] or bool(row['has_submission'])
 
-    non_submitters.sort(key=lambda r: r['crew_id'])
+    for row in logs: process_row(row)
+    for row in recs: process_row(row)
+
+    # Now aggregate per crew
+    crew_stats = {}
+    for key, data in duty_map.items():
+        cid = data['crew_id']
+        if cid not in crew_stats:
+            crew_stats[cid] = {
+                'crew_id': cid,
+                'name': data['name'],
+                'desig': data['desig'],
+                'total_duties': 0,
+                'submitted': 0,
+                'not_submitted': 0
+            }
+        
+        crew_stats[cid]['total_duties'] += 1
+        if data['has_submission']:
+            crew_stats[cid]['submitted'] += 1
+        else:
+            crew_stats[cid]['not_submitted'] += 1
+
+    # Filter to only show crew who have at least one not_submitted duty
+    non_submitters = [stats for stats in crew_stats.values() if stats['not_submitted'] > 0]
+    non_submitters.sort(key=lambda x: x['not_submitted'], reverse=True)
 
     if do_export:
         import io
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['Crew ID', 'Name', 'Designation', 'From Station', 'Sign-On Time', 'Category'])
+        writer.writerow(['Crew ID', 'Name', 'Designation', 'Total Duties', 'Submitted', 'Not Submitted'])
         for row in non_submitters:
             writer.writerow([
                 row['crew_id'], row['name'], row['desig'],
-                row['from_sttn'], row['sign_on_time'], row['category']
+                row['total_duties'], row['submitted'], row['not_submitted']
             ])
         output.seek(0)
         filename = f"Non_Submitters_{from_date_str}_to_{to_date_str}.csv"
@@ -1997,6 +2104,7 @@ def api_sync():
                 is_new_shift = True
 
             if is_new_shift:
+                archive_to_duty_log(conn, crew_id)
                 conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
                 conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
                 # Reset found_in_ns so old duty's NS check doesn't carry over to new duty
@@ -2060,11 +2168,13 @@ def api_sync():
                 if new_miss_count >= MISS_THRESHOLD:
                     conn.execute('''
                         UPDATE crew_records
-                        SET sign_off_time = ?, synced_at = ?
+                        SET sign_off_time = ?, synced_at = ?, is_active = 0
                         WHERE crew_id = ? AND (sign_off_time IS NULL OR sign_off_time = '' OR sign_off_time = '-')
                     ''', (synced_at, synced_at, cid))
+                    archive_to_duty_log(conn, cid, has_submission=1)
             else:
-                conn.execute('DELETE FROM crew_records WHERE crew_id = ?', (cid,))
+                archive_to_duty_log(conn, cid, has_submission=0)
+                conn.execute('UPDATE crew_records SET is_active = 0 WHERE crew_id = ?', (cid,))
         else:
             conn.execute('UPDATE crew_submissions SET ingest_miss_count = 0 WHERE crew_id = ?', (cid,))
     
