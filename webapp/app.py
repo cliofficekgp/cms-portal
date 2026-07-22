@@ -1534,16 +1534,16 @@ def crew_list():
             from_sttn = (row.get('from_sttn', '') or '').upper().strip()
             cto_sttn = (row.get('current_location', '') or '').upper().strip()
             
-            # Normalize NPTY to NMP for comparison
-            from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
-            cto_sttn_norm = 'NMP' if cto_sttn == 'NPTY' else cto_sttn
+            nmp_cluster = {'NMP', 'NPTY', 'NKKH', 'NMMS', 'NMPY', 'NPDY', 'NPRY'}
+            from_sttn_norm = 'NMP' if from_sttn in nmp_cluster else from_sttn
+            cto_sttn_norm = 'NMP' if cto_sttn in nmp_cluster else cto_sttn
 
             is_pdd_sttn = False
             if sign_on_dt:
-                # Check special case: sign on in {NMP, KGP} and CTO in {NMP, KGP} (using normalized stations)
-                if from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
+                if from_sttn in {'BHC', 'TATA'} and parse_dt(row.get('departure_time')):
                     is_pdd_sttn = True
-                # Otherwise, check if sign on station is in standard lobbies and equals the CTO station
+                elif from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
+                    is_pdd_sttn = True
                 elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
                     is_pdd_sttn = True
 
@@ -1795,11 +1795,14 @@ def compute_frozen_pdd(crew_id, conn):
     dep_dt = parse_dt(dep_time)
     
     lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
-    from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
-    cto_sttn_norm = 'NMP' if curr_loc == 'NPTY' else curr_loc
+    nmp_cluster = {'NMP', 'NPTY', 'NKKH', 'NMMS', 'NMPY', 'NPDY', 'NPRY'}
+    from_sttn_norm = 'NMP' if from_sttn in nmp_cluster else from_sttn
+    cto_sttn_norm = 'NMP' if curr_loc in nmp_cluster else curr_loc
     
     is_pdd_sttn = False
-    if from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
+    if from_sttn in {'BHC', 'TATA'} and dep_dt:
+        is_pdd_sttn = True
+    elif from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
         is_pdd_sttn = True
     elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
         is_pdd_sttn = True
