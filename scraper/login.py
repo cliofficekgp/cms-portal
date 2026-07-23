@@ -458,7 +458,9 @@ def main_loop():
             
             try:
                 import sqlite3
-                conn = sqlite3.connect(os.path.join(DATA_DIR, 'crew.db'))
+                conn = sqlite3.connect(os.path.join(DATA_DIR, 'crew.db'), timeout=10.0)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
                 cur = conn.cursor()
                 cur.execute('SELECT cms_username, cms_password FROM cms_settings WHERE id = 1')
                 row = cur.fetchone()
