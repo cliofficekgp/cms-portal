@@ -376,6 +376,12 @@ def run_cleanup_thread():
                 
                 conn.commit()
         except Exception as e:
+            if isinstance(e, sqlite3.OperationalError):
+                err_msg = str(e).lower()
+                if "disk i/o error" in err_msg or "database is locked" in err_msg or "readonly" in err_msg:
+                    print(f"CRITICAL: DB I/O Error detected in cleanup thread ({e}). Force restarting container...", flush=True)
+                    import os
+                    os._exit(1)
             print(f"[Thread] Cleanup thread exception: {e}")
         finally:
             if conn:
@@ -481,6 +487,18 @@ def archive_to_duty_log(conn, crew_id, has_submission=None):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.errorhandler(Exception)
+def handle_global_error(e):
+    if isinstance(e, sqlite3.OperationalError):
+        err_msg = str(e).lower()
+        if "disk i/o error" in err_msg or "database is locked" in err_msg or "readonly" in err_msg:
+            print(f"CRITICAL: DB I/O Error detected ({e}). Force restarting container...", flush=True)
+            # os._exit(1) exits the process immediately with an error code,
+            # triggering Docker/Coolify's auto-restart policy to recover the server.
+            os._exit(1)
+    # Re-raise for default 500 handling if it's not a critical DB error
+    raise e
 
 @app.route('/')
 def index():
