@@ -296,6 +296,7 @@ def init_db():
     ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_duty_log_crew_id ON crew_duty_log (crew_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_duty_log_sign_on ON crew_duty_log (sign_on_time)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_submissions_crew_id ON crew_submissions (crew_id)')
     
     # Bootstrap default super_admin if no users exist
     user_count = cur.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -889,6 +890,8 @@ def admin_settings():
                 flash('Settings saved successfully.', 'success')
             except Exception as e:
                 flash(f'Failed to save settings: {str(e)}', 'error')
+            finally:
+                conn.close()
             return redirect(url_for('admin_settings'))
         else:
             flash('Both username and password are required.', 'error')
