@@ -632,8 +632,53 @@ def submit():
 
     submitted_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
 
-    with DB_WRITE_LOCK:
-        conn = get_db()
+    conn = get_db()
+    conn.execute('''
+        INSERT INTO crew_submissions
+            (crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
+             loco_no, train_no, bpc_no, current_location, cto_time,
+             duty_hrs, sign_off_time, submitted_at,
+             is_relief, relief_station, relief_datetime, handover_crew_id, departure_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
+        loco_no, train_no, bpc_no, current_loc, cto_time,
+        '', '-', submitted_at,
+        is_relief, relief_stn, relief_dt, handover_id, departure_time
+    ))
+
+    existing = conn.execute('SELECT crew_id FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
+    if not existing:
+        conn.execute('''
+            INSERT OR IGNORE INTO crew_records
+                (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
+                 sign_off_time, duty_hrs, route, loco_no, train_no,
+                 category, manually_edited, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
+            '-', '', '', loco_no, train_no,
+            'MANUAL', 1, submitted_at
+        ))
+
+    # --- Handover Auto-Save for relief crew B ---
+    if is_relief and handover_id:
+        # Inherit loco, train, bpc from current crew's latest submission
+        # from_sttn is NOT changed (kept from crew B's own CMS record)
+        existing_b = conn.execute(
+            'SELECT * FROM crew_records WHERE crew_id = ?', (handover_id,)
+        ).fetchone()
+        # Check if crew B already has a submission for the same duty
+        existing_b_sub = conn.execute(
+            'SELECT id FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1',
+            (handover_id,)
+        ).fetchone()
+
+        handover_from = dict(existing_b)['from_sttn'] if existing_b else ''
+        handover_sign_on = dict(existing_b)['sign_on_time'] if existing_b else ''
+        handover_name = dict(existing_b)['name'] if existing_b else ''
+        handover_desig = dict(existing_b)['desig'] if existing_b else ''
+
         conn.execute('''
             INSERT INTO crew_submissions
                 (crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
@@ -642,14 +687,19 @@ def submit():
                  is_relief, relief_station, relief_datetime, handover_crew_id, departure_time)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
-            loco_no, train_no, bpc_no, current_loc, cto_time,
+            handover_id, handover_name, handover_desig,
+            handover_sign_on,
+            handover_from,  # from_sttn NOT changed
+            to_sttn,
+            loco_no, train_no, bpc_no,
+            relief_stn,   # incoming crew starts at relief station
+            relief_dt,    # their CTO time = relief time
             '', '-', submitted_at,
-            is_relief, relief_stn, relief_dt, handover_id, departure_time
+            0, '', '', crew_id, ''
         ))
 
-        existing = conn.execute('SELECT crew_id FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
-        if not existing:
+        # Ensure crew B exists in crew_records
+        if not existing_b:
             conn.execute('''
                 INSERT OR IGNORE INTO crew_records
                     (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
@@ -657,69 +707,18 @@ def submit():
                      category, manually_edited, synced_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
+                handover_id, '', '', '', '', to_sttn,
                 '-', '', '', loco_no, train_no,
                 'MANUAL', 1, submitted_at
             ))
 
-        # --- Handover Auto-Save for relief crew B ---
-        if is_relief and handover_id:
-            # Inherit loco, train, bpc from current crew's latest submission
-            # from_sttn is NOT changed (kept from crew B's own CMS record)
-            existing_b = conn.execute(
-                'SELECT * FROM crew_records WHERE crew_id = ?', (handover_id,)
-            ).fetchone()
-            # Check if crew B already has a submission for the same duty
-            existing_b_sub = conn.execute(
-                'SELECT id FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1',
-                (handover_id,)
-            ).fetchone()
+    # Mark crew_duty_log entry as has_submission for both this crew and the handover crew
+    archive_to_duty_log(conn, crew_id, has_submission=1)
+    if is_relief and handover_id:
+        archive_to_duty_log(conn, handover_id, has_submission=1)
 
-            handover_from = dict(existing_b)['from_sttn'] if existing_b else ''
-            handover_sign_on = dict(existing_b)['sign_on_time'] if existing_b else ''
-            handover_name = dict(existing_b)['name'] if existing_b else ''
-            handover_desig = dict(existing_b)['desig'] if existing_b else ''
-
-            conn.execute('''
-                INSERT INTO crew_submissions
-                    (crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
-                     loco_no, train_no, bpc_no, current_location, cto_time,
-                     duty_hrs, sign_off_time, submitted_at,
-                     is_relief, relief_station, relief_datetime, handover_crew_id, departure_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                handover_id, handover_name, handover_desig,
-                handover_sign_on,
-                handover_from,  # from_sttn NOT changed
-                to_sttn,
-                loco_no, train_no, bpc_no,
-                relief_stn,   # incoming crew starts at relief station
-                relief_dt,    # their CTO time = relief time
-                '', '-', submitted_at,
-                0, '', '', crew_id, ''
-            ))
-
-            # Ensure crew B exists in crew_records
-            if not existing_b:
-                conn.execute('''
-                    INSERT OR IGNORE INTO crew_records
-                        (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
-                         sign_off_time, duty_hrs, route, loco_no, train_no,
-                         category, manually_edited, synced_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    handover_id, '', '', '', '', to_sttn,
-                    '-', '', '', loco_no, train_no,
-                    'MANUAL', 1, submitted_at
-                ))
-
-        # Mark crew_duty_log entry as has_submission for both this crew and the handover crew
-        archive_to_duty_log(conn, crew_id, has_submission=1)
-        if is_relief and handover_id:
-            archive_to_duty_log(conn, handover_id, has_submission=1)
-
-        conn.commit()
-        conn.close()
+    conn.commit()
+    conn.close()
 
     return render_template('success.html', crew_id=crew_id)
 
@@ -768,12 +767,11 @@ def admin_change_password():
             return render_template('admin_change_password.html', error='Password must be at least 6 characters')
             
         hashed = generate_password_hash(new_password)
-        with DB_WRITE_LOCK:
-            conn = get_db()
-            conn.execute('UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?', 
-                         (hashed, session['user_id']))
-            conn.commit()
-            conn.close()
+        conn = get_db()
+        conn.execute('UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?', 
+                     (hashed, session['user_id']))
+        conn.commit()
+        conn.close()
         
         session['force_password_change'] = 0
         if session.get('role') == 'super_admin':
@@ -810,9 +808,8 @@ def admin_forgot_password():
         if step == '3':
             new_password = request.form.get('new_password')
             hashed = generate_password_hash(new_password)
-            with DB_WRITE_LOCK:
-                conn.execute('UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?', (hashed, user['id']))
-                conn.commit()
+            conn.execute('UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?', (hashed, user['id']))
+            conn.commit()
             conn.close()
             return redirect(url_for('admin_login'))
             
@@ -840,11 +837,10 @@ def admin_signup():
         hashed_pw = generate_password_hash(password)
         hashed_ans = generate_password_hash(answer)
         
-        with DB_WRITE_LOCK:
-            conn.execute('INSERT INTO users (username, password_hash, role, secret_question, secret_answer_hash) VALUES (?, ?, ?, ?, ?)',
-                         (username, hashed_pw, 'admin', question, hashed_ans))
-            conn.execute('UPDATE signup_passcodes SET is_used = 1 WHERE id = ?', (pc_row['id'],))
-            conn.commit()
+        conn.execute('INSERT INTO users (username, password_hash, role, secret_question, secret_answer_hash) VALUES (?, ?, ?, ?, ?)',
+                     (username, hashed_pw, 'admin', question, hashed_ans))
+        conn.execute('UPDATE signup_passcodes SET is_used = 1 WHERE id = ?', (pc_row['id'],))
+        conn.commit()
         conn.close()
         
         return redirect(url_for('admin_login'))
@@ -867,24 +863,22 @@ def super_admin():
 @super_admin_required
 def generate_passcode():
     code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-    with DB_WRITE_LOCK:
-        conn = get_db()
-        conn.execute('INSERT INTO signup_passcodes (passcode, created_by) VALUES (?, ?)', (code, session['user_id']))
-        conn.commit()
-        conn.close()
+    conn = get_db()
+    conn.execute('INSERT INTO signup_passcodes (passcode, created_by) VALUES (?, ?)', (code, session['user_id']))
+    conn.commit()
+    conn.close()
     return redirect(url_for('super_admin'))
 
 @app.route('/super_admin/reset_password/<int:user_id>', methods=['POST'])
 @super_admin_required
 def reset_user_password(user_id):
-    with DB_WRITE_LOCK:
-        conn = get_db()
-        user = conn.execute('SELECT role FROM users WHERE id = ?', (user_id,)).fetchone()
-        if user and user['role'] != 'super_admin':
-            default_pw = generate_password_hash('Default@123')
-            conn.execute('UPDATE users SET password_hash = ?, force_password_change = 1 WHERE id = ?', (default_pw, user_id))
-            conn.commit()
-        conn.close()
+    conn = get_db()
+    user = conn.execute('SELECT role FROM users WHERE id = ?', (user_id,)).fetchone()
+    if user and user['role'] != 'super_admin':
+        default_pw = generate_password_hash('Default@123')
+        conn.execute('UPDATE users SET password_hash = ?, force_password_change = 1 WHERE id = ?', (default_pw, user_id))
+        conn.commit()
+    conn.close()
     return redirect(url_for('super_admin'))
 
 # ---------------------------------------------------------------------------
@@ -905,19 +899,18 @@ def admin_settings():
         # Checkbox: present = 1, absent = 0
         allow_manual = 1 if request.form.get('allow_manual_entry') == 'on' else 0
         if cms_user and cms_pass:
-            with DB_WRITE_LOCK:
-                conn = get_db()
-                try:
-                    conn.execute(
-                        'UPDATE cms_settings SET cms_username = ?, cms_password = ?, allow_manual_entry = ? WHERE id = 1',
-                        (cms_user, cms_pass, allow_manual)
-                    )
-                    conn.commit()
-                    flash('Settings saved successfully.', 'success')
-                except Exception as e:
-                    flash(f'Failed to save settings: {str(e)}', 'error')
-                finally:
-                    conn.close()
+            conn = get_db()
+            try:
+                conn.execute(
+                    'UPDATE cms_settings SET cms_username = ?, cms_password = ?, allow_manual_entry = ? WHERE id = 1',
+                    (cms_user, cms_pass, allow_manual)
+                )
+                conn.commit()
+                flash('Settings saved successfully.', 'success')
+            except Exception as e:
+                flash(f'Failed to save settings: {str(e)}', 'error')
+            finally:
+                conn.close()
             return redirect(url_for('admin_settings'))
         else:
             flash('Both username and password are required.', 'error')
@@ -1325,22 +1318,21 @@ def crew_list():
     # Full join of records and submissions
     
     # Mark signed off crews as inactive
-    with DB_WRITE_LOCK:
-        conn.execute('''
-            UPDATE crew_records 
-            SET is_active = 0 
-            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
-        ''')
-        conn.execute('''
-            UPDATE crew_submissions 
-            SET is_active = 0 
-            WHERE is_active = 1 
-            AND crew_id IN (
-                SELECT crew_id FROM crew_records 
-                WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
-            )
-        ''')
-        conn.commit()
+    conn.execute('''
+        UPDATE crew_records 
+        SET is_active = 0 
+        WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
+    ''')
+    conn.execute('''
+        UPDATE crew_submissions 
+        SET is_active = 0 
+        WHERE is_active = 1 
+        AND crew_id IN (
+            SELECT crew_id FROM crew_records 
+            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
+        )
+    ''')
+    conn.commit()
 
     query = '''
     SELECT 
@@ -1718,28 +1710,27 @@ def crew_list():
 
     # --- Execute all deferred DB cleanup in one batch using the single conn ---
     try:
-        with DB_WRITE_LOCK:
-            updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-            for cid, pdd_val in _freeze_pdd:
-                conn.execute('''
-                    INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                    VALUES (?, 'frozen_pdd', ?, ?)
-                    ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                ''', (cid, pdd_val, updated_at_freeze))
+        updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+        for cid, pdd_val in _freeze_pdd:
+            conn.execute('''
+                INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                VALUES (?, 'frozen_pdd', ?, ?)
+                ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+            ''', (cid, pdd_val, updated_at_freeze))
                 
-            for cid, field in _del_admin_edits:
-                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
-            for cid in _del_submissions:
-                conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (cid,))
-            for cid in _del_loc_admin:
-                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (cid,))
-            for cid in _null_loc_sub:
-                conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (cid,))
-            for cid in _del_relief_admin:
-                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (cid,))
-            for cid in _null_relief_sub:
-                conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (cid,))
-            conn.commit()
+        for cid, field in _del_admin_edits:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
+        for cid in _del_submissions:
+            conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (cid,))
+        for cid in _del_loc_admin:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (cid,))
+        for cid in _null_loc_sub:
+            conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (cid,))
+        for cid in _del_relief_admin:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (cid,))
+        for cid in _null_relief_sub:
+            conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (cid,))
+        conn.commit()
     except Exception as e:
         print(f"Deferred cleanup error: {e}")
     finally:
@@ -1772,12 +1763,11 @@ def save_ns_status():
     if not payload:
         return jsonify({'status': 'error', 'message': 'No data'})
         
-    with DB_WRITE_LOCK:
-        conn = get_db()
-        for crew_id, status in payload.items():
-            conn.execute('UPDATE crew_records SET found_in_ns = ? WHERE crew_id = ?', (status, crew_id))
-        conn.commit()
-        conn.close()
+    conn = get_db()
+    for crew_id, status in payload.items():
+        conn.execute('UPDATE crew_records SET found_in_ns = ? WHERE crew_id = ?', (status, crew_id))
+    conn.commit()
+    conn.close()
     return jsonify({'status': 'ok'})
 
 
@@ -1873,108 +1863,107 @@ def api_admin_edit():
     if not crew_id or field not in ALLOWED_FIELDS:
         return jsonify({'status': 'error', 'message': 'Invalid field or crew_id'}), 400
 
-    with DB_WRITE_LOCK:
-        conn = get_db()
+    conn = get_db()
 
-        # If location is explicitly being removed, freeze the PDD calculation BEFORE saving
-        if field == 'current_location':
-            if value == '':
+    # If location is explicitly being removed, freeze the PDD calculation BEFORE saving
+    if field == 'current_location':
+        if value == '':
+            frozen = compute_frozen_pdd(crew_id, conn)
+            if frozen:
+                updated_at_pdd = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+                conn.execute('''
+                    INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                    VALUES (?, 'frozen_pdd', ?, ?)
+                    ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                ''', (crew_id, frozen, updated_at_pdd))
+        else:
+            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'frozen_pdd'", (crew_id,))
+
+    if field in ('cto_time', 'departure_time', 'relief_datetime') and value and value not in ['-', '–']:
+        # Construct full datetime from sign_on_time + submitted time
+        r = conn.execute('''
+            SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time 
+            FROM crew_records r 
+            LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id 
+            WHERE r.crew_id = ?
+            ORDER BY s.id DESC LIMIT 1
+        ''', (crew_id,)).fetchone()
+            
+        if r and r['sign_on_time']:
+            sign_on_dt = parse_dt(r['sign_on_time'])
+            if sign_on_dt:
+                try:
+                    h, m = map(int, value.split(':'))
+                    new_dt = sign_on_dt.replace(hour=h, minute=m, second=0)
+                    if new_dt < sign_on_dt:
+                        new_dt += timedelta(days=1)
+                    value = new_dt.strftime('%d-%m-%Y %H:%M:%S')
+                except ValueError:
+                    pass
+
+    updated_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+    conn.execute('''
+        INSERT INTO admin_edits (crew_id, field, value, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+    ''', (crew_id, field, value, updated_at))
+
+    # Auto-clear location and freeze PDD if departure_time is entered and is >= last loc update
+    if field == 'departure_time' and value and value not in ['-', '–']:
+        loc_row = conn.execute('''
+            SELECT COALESCE(s.current_location, '') as sub_loc,
+                   s.submitted_at as sub_time,
+                   a.value as admin_loc,
+                   a.updated_at as admin_loc_time
+            FROM crew_records r
+            LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id
+            LEFT JOIN admin_edits a ON r.crew_id = a.crew_id AND a.field = 'current_location'
+            WHERE r.crew_id = ?
+            ORDER BY s.id DESC LIMIT 1
+        ''', (crew_id,)).fetchone()
+
+        if loc_row:
+            admin_loc_time_str = loc_row['admin_loc_time']
+            admin_loc_dt = parse_dt(admin_loc_time_str) if admin_loc_time_str else None
+            sub_loc_time_str = loc_row['sub_time']
+            sub_loc_dt = parse_dt(sub_loc_time_str) if sub_loc_time_str else None
+
+            active_loc = ''
+            loc_time_dt = None
+            if admin_loc_dt and sub_loc_dt:
+                if admin_loc_dt >= sub_loc_dt:
+                    active_loc = loc_row['admin_loc']
+                    loc_time_dt = admin_loc_dt
+                else:
+                    active_loc = loc_row['sub_loc']
+                    loc_time_dt = sub_loc_dt
+            elif admin_loc_dt:
+                active_loc = loc_row['admin_loc']
+                loc_time_dt = admin_loc_dt
+            elif sub_loc_dt:
+                active_loc = loc_row['sub_loc']
+                loc_time_dt = sub_loc_dt
+
+            new_dep_dt = parse_dt(value)
+            if active_loc and new_dep_dt and loc_time_dt and new_dep_dt >= loc_time_dt:
+                # Freeze PDD using current location and new departure time (already saved above)
                 frozen = compute_frozen_pdd(crew_id, conn)
                 if frozen:
-                    updated_at_pdd = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
                     conn.execute('''
                         INSERT INTO admin_edits (crew_id, field, value, updated_at)
                         VALUES (?, 'frozen_pdd', ?, ?)
                         ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                    ''', (crew_id, frozen, updated_at_pdd))
-            else:
-                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'frozen_pdd'", (crew_id,))
-
-        if field in ('cto_time', 'departure_time', 'relief_datetime') and value and value not in ['-', '–']:
-            # Construct full datetime from sign_on_time + submitted time
-            r = conn.execute('''
-                SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time 
-                FROM crew_records r 
-                LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id 
-                WHERE r.crew_id = ?
-                ORDER BY s.id DESC LIMIT 1
-            ''', (crew_id,)).fetchone()
-            
-            if r and r['sign_on_time']:
-                sign_on_dt = parse_dt(r['sign_on_time'])
-                if sign_on_dt:
-                    try:
-                        h, m = map(int, value.split(':'))
-                        new_dt = sign_on_dt.replace(hour=h, minute=m, second=0)
-                        if new_dt < sign_on_dt:
-                            new_dt += timedelta(days=1)
-                        value = new_dt.strftime('%d-%m-%Y %H:%M:%S')
-                    except ValueError:
-                        pass
-
-        updated_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-        conn.execute('''
-            INSERT INTO admin_edits (crew_id, field, value, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-        ''', (crew_id, field, value, updated_at))
-
-        # Auto-clear location and freeze PDD if departure_time is entered and is >= last loc update
-        if field == 'departure_time' and value and value not in ['-', '–']:
-            loc_row = conn.execute('''
-                SELECT COALESCE(s.current_location, '') as sub_loc,
-                       s.submitted_at as sub_time,
-                       a.value as admin_loc,
-                       a.updated_at as admin_loc_time
-                FROM crew_records r
-                LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id
-                LEFT JOIN admin_edits a ON r.crew_id = a.crew_id AND a.field = 'current_location'
-                WHERE r.crew_id = ?
-                ORDER BY s.id DESC LIMIT 1
-            ''', (crew_id,)).fetchone()
-
-            if loc_row:
-                admin_loc_time_str = loc_row['admin_loc_time']
-                admin_loc_dt = parse_dt(admin_loc_time_str) if admin_loc_time_str else None
-                sub_loc_time_str = loc_row['sub_time']
-                sub_loc_dt = parse_dt(sub_loc_time_str) if sub_loc_time_str else None
-
-                active_loc = ''
-                loc_time_dt = None
-                if admin_loc_dt and sub_loc_dt:
-                    if admin_loc_dt >= sub_loc_dt:
-                        active_loc = loc_row['admin_loc']
-                        loc_time_dt = admin_loc_dt
-                    else:
-                        active_loc = loc_row['sub_loc']
-                        loc_time_dt = sub_loc_dt
-                elif admin_loc_dt:
-                    active_loc = loc_row['admin_loc']
-                    loc_time_dt = admin_loc_dt
-                elif sub_loc_dt:
-                    active_loc = loc_row['sub_loc']
-                    loc_time_dt = sub_loc_dt
-
-                new_dep_dt = parse_dt(value)
-                if active_loc and new_dep_dt and loc_time_dt and new_dep_dt >= loc_time_dt:
-                    # Freeze PDD using current location and new departure time (already saved above)
-                    frozen = compute_frozen_pdd(crew_id, conn)
-                    if frozen:
-                        conn.execute('''
-                            INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                            VALUES (?, 'frozen_pdd', ?, ?)
-                            ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                        ''', (crew_id, frozen, updated_at))
+                    ''', (crew_id, frozen, updated_at))
                     
-                    # Clear the location
-                    conn.execute('''
-                        INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                        VALUES (?, 'current_location', '', ?)
-                        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                    ''', (crew_id, updated_at))
+                # Clear the location
+                conn.execute('''
+                    INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                    VALUES (?, 'current_location', '', ?)
+                    ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                ''', (crew_id, updated_at))
 
-        conn.commit()
-        conn.close()
+    conn.commit()
+    conn.close()
     return jsonify({'status': 'ok'})
 
 
@@ -1992,25 +1981,24 @@ def api_add_phone():
     if not crew_id or not phone:
         return jsonify({'status': 'error', 'message': 'crew_id and phone required'}), 400
 
-    with DB_WRITE_LOCK:
-        conn = get_db()
-        existing = conn.execute('SELECT mobile_number FROM booking_ta_crew WHERE crew_id = ?', (crew_id,)).fetchone()
-        fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+    conn = get_db()
+    existing = conn.execute('SELECT mobile_number FROM booking_ta_crew WHERE crew_id = ?', (crew_id,)).fetchone()
+    fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
 
-        if existing:
-            current = existing['mobile_number'] or ''
-            numbers = [n.strip() for n in current.split(',') if n.strip()]
-            if phone not in numbers:
-                numbers.append(phone)
-            new_value = ', '.join(numbers)
-            conn.execute('UPDATE booking_ta_crew SET mobile_number = ?, fetched_at = ? WHERE crew_id = ?',
-                         (new_value, fetched_at, crew_id))
-        else:
-            conn.execute('INSERT INTO booking_ta_crew (crew_id, mobile_number, fetched_at) VALUES (?, ?, ?)',
-                         (crew_id, phone, fetched_at))
+    if existing:
+        current = existing['mobile_number'] or ''
+        numbers = [n.strip() for n in current.split(',') if n.strip()]
+        if phone not in numbers:
+            numbers.append(phone)
+        new_value = ', '.join(numbers)
+        conn.execute('UPDATE booking_ta_crew SET mobile_number = ?, fetched_at = ? WHERE crew_id = ?',
+                     (new_value, fetched_at, crew_id))
+    else:
+        conn.execute('INSERT INTO booking_ta_crew (crew_id, mobile_number, fetched_at) VALUES (?, ?, ?)',
+                     (crew_id, phone, fetched_at))
 
-        conn.commit()
-        conn.close()
+    conn.commit()
+    conn.close()
     return jsonify({'status': 'ok'})
 
 @app.route('/api/crew_lookup/<crew_id>', methods=['GET'])
@@ -2092,27 +2080,29 @@ def api_sync_ta():
     payload = request.get_json(force=True)
     if not payload or not isinstance(payload, list): return jsonify({'error': 'Invalid payload'}), 400
 
-    with DB_WRITE_LOCK:
-        conn = get_db()
-        fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+    conn = get_db()
+    fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
 
-        for rec in payload:
-            crew_id = rec.get('crew_id')
-            if not crew_id: continue
-            ordering_time = rec.get('ordering_time', '')
-            mobile_number = rec.get('mobile_number', '')
+    for i, rec in enumerate(payload):
+        crew_id = rec.get('crew_id')
+        if not crew_id: continue
+        ordering_time = rec.get('ordering_time', '')
+        mobile_number = rec.get('mobile_number', '')
             
-            conn.execute('''
-                INSERT INTO booking_ta_crew (crew_id, ordering_time, mobile_number, fetched_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(crew_id) DO UPDATE SET
-                    ordering_time=excluded.ordering_time,
-                    mobile_number=excluded.mobile_number,
-                    fetched_at=excluded.fetched_at
-            ''', (crew_id, ordering_time, mobile_number, fetched_at))
+        conn.execute('''
+            INSERT INTO booking_ta_crew (crew_id, ordering_time, mobile_number, fetched_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(crew_id) DO UPDATE SET
+                ordering_time=excluded.ordering_time,
+                mobile_number=excluded.mobile_number,
+                fetched_at=excluded.fetched_at
+        ''', (crew_id, ordering_time, mobile_number, fetched_at))
+        
+        if i > 0 and i % 50 == 0:
+            conn.commit()
             
-        conn.commit()
-        conn.close()
+    conn.commit()
+    conn.close()
     return jsonify({'status': 'success', 'count': len(payload)})
 
 @app.route('/api/sync', methods=['POST'])
@@ -2123,103 +2113,108 @@ def api_sync():
     payload = request.get_json(force=True)
     if not payload or not isinstance(payload, dict): return jsonify({'error': 'Invalid payload'}), 400
 
-    with DB_WRITE_LOCK:
-        conn = get_db()
-        inserted = updated = skipped = 0
-        synced_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+    conn = get_db()
+    inserted = updated = skipped = 0
+    synced_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
 
-        for crew_id, rec in payload.items():
-            existing = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
-            if existing:
-                existing = dict(existing)
-                sub = conn.execute('SELECT id FROM crew_submissions WHERE crew_id = ?', (crew_id,)).fetchone()
+    for i, (crew_id, rec) in enumerate(payload.items()):
+        existing = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
+        if existing:
+            existing = dict(existing)
+            sub = conn.execute('SELECT id FROM crew_submissions WHERE crew_id = ?', (crew_id,)).fetchone()
                 
-                old_dt = parse_dt(existing.get('sign_on_time'))
-                new_dt = parse_dt(rec.get('sign_on_time'))
-                is_new_shift = False
-                if old_dt and new_dt:
-                    if abs((old_dt - new_dt).total_seconds()) > 3600:
-                        is_new_shift = True
-                elif str(existing.get('sign_on_time') or '').strip() != str(rec.get('sign_on_time') or '').strip():
+            old_dt = parse_dt(existing.get('sign_on_time'))
+            new_dt = parse_dt(rec.get('sign_on_time'))
+            is_new_shift = False
+            if old_dt and new_dt:
+                if abs((old_dt - new_dt).total_seconds()) > 3600:
                     is_new_shift = True
+            elif str(existing.get('sign_on_time') or '').strip() != str(rec.get('sign_on_time') or '').strip():
+                is_new_shift = True
 
-                if is_new_shift:
-                    archive_to_duty_log(conn, crew_id)
-                    conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
-                    conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
-                    # Reset found_in_ns so old duty's NS check doesn't carry over to new duty
-                    conn.execute("UPDATE crew_records SET found_in_ns = 'no' WHERE crew_id = ?", (crew_id,))
-                    has_manual_sub = False
-                else:
-                    has_manual_sub = bool(sub)
-
-                if has_manual_sub:
-                    conn.execute('''
-                        UPDATE crew_records SET duty_hrs = ?, sign_off_time = ?, synced_at = ?, is_active = 1
-                        WHERE crew_id = ?
-                    ''', (rec.get('duty_hrs', ''), rec.get('sign_off_time', '-'), synced_at, crew_id))
-                    skipped += 1
-                else:
-                    conn.execute('''
-                        UPDATE crew_records
-                        SET name=?, desig=?, from_sttn=?, sign_on_time=?,
-                            to_sttn=?, sign_off_time=?, duty_hrs=?,
-                            route=?, loco_no=?, train_no=?, category=?,
-                            manually_edited=0, synced_at=?, is_active=1
-                        WHERE crew_id = ?
-                    ''', (
-                        rec.get('name',''), rec.get('desig',''), rec.get('from_sttn',''), rec.get('sign_on_time',''),
-                        rec.get('to_sttn',''), rec.get('sign_off_time','-'), rec.get('duty_hrs',''), rec.get('route',''),
-                        rec.get('loco_no',''), rec.get('train_no',''), rec.get('category',''), synced_at, crew_id
-                    ))
-                    updated += 1
-            else:
-                # Brand new crew detected. Wipe any ancient stale data just in case.
+            if is_new_shift:
+                archive_to_duty_log(conn, crew_id)
                 conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
                 conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
-                
-                conn.execute('''
-                    INSERT INTO crew_records
-                        (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
-                         sign_off_time, duty_hrs, route, loco_no, train_no,
-                         category, manually_edited, synced_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    crew_id, rec.get('name',''), rec.get('desig',''), rec.get('from_sttn',''), rec.get('sign_on_time',''),
-                    rec.get('to_sttn',''), rec.get('sign_off_time','-'), rec.get('duty_hrs',''), rec.get('route',''),
-                    rec.get('loco_no',''), rec.get('train_no',''), rec.get('category',''), 0, synced_at
-                ))
-                inserted += 1
-
-        MISS_THRESHOLD = 2  # missed 2 consecutive syncs (~1hr, given 30-min scraper interval) = treat as signed off
-
-        payload_ids = set(payload.keys())
-        all_db = conn.execute('SELECT crew_id FROM crew_records').fetchall()
-        for row in all_db:
-            cid = row['crew_id']
-            if cid not in payload_ids:
-                sub = conn.execute(
-                    'SELECT id, ingest_miss_count FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1',
-                    (cid,)
-                ).fetchone()
-                if sub:
-                    new_miss_count = (sub['ingest_miss_count'] or 0) + 1
-                    conn.execute('UPDATE crew_submissions SET ingest_miss_count = ? WHERE id = ?', (new_miss_count, sub['id']))
-                    if new_miss_count >= MISS_THRESHOLD:
-                        conn.execute('''
-                            UPDATE crew_records
-                            SET sign_off_time = ?, synced_at = ?, is_active = 0
-                            WHERE crew_id = ? AND (sign_off_time IS NULL OR sign_off_time = '' OR sign_off_time = '-')
-                        ''', (synced_at, synced_at, cid))
-                        archive_to_duty_log(conn, cid, has_submission=1)
-                else:
-                    archive_to_duty_log(conn, cid, has_submission=0)
-                    conn.execute('UPDATE crew_records SET is_active = 0 WHERE crew_id = ?', (cid,))
+                # Reset found_in_ns so old duty's NS check doesn't carry over to new duty
+                conn.execute("UPDATE crew_records SET found_in_ns = 'no' WHERE crew_id = ?", (crew_id,))
+                has_manual_sub = False
             else:
-                conn.execute('UPDATE crew_submissions SET ingest_miss_count = 0 WHERE crew_id = ?', (cid,))
+                has_manual_sub = bool(sub)
+
+            if has_manual_sub:
+                conn.execute('''
+                    UPDATE crew_records SET duty_hrs = ?, sign_off_time = ?, synced_at = ?, is_active = 1
+                    WHERE crew_id = ?
+                ''', (rec.get('duty_hrs', ''), rec.get('sign_off_time', '-'), synced_at, crew_id))
+                skipped += 1
+            else:
+                conn.execute('''
+                    UPDATE crew_records
+                    SET name=?, desig=?, from_sttn=?, sign_on_time=?,
+                        to_sttn=?, sign_off_time=?, duty_hrs=?,
+                        route=?, loco_no=?, train_no=?, category=?,
+                        manually_edited=0, synced_at=?, is_active=1
+                    WHERE crew_id = ?
+                ''', (
+                    rec.get('name',''), rec.get('desig',''), rec.get('from_sttn',''), rec.get('sign_on_time',''),
+                    rec.get('to_sttn',''), rec.get('sign_off_time','-'), rec.get('duty_hrs',''), rec.get('route',''),
+                    rec.get('loco_no',''), rec.get('train_no',''), rec.get('category',''), synced_at, crew_id
+                ))
+                updated += 1
+        else:
+            # Brand new crew detected. Wipe any ancient stale data just in case.
+            conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
+            conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
+                
+            conn.execute('''
+                INSERT INTO crew_records
+                    (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
+                     sign_off_time, duty_hrs, route, loco_no, train_no,
+                     category, manually_edited, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                crew_id, rec.get('name',''), rec.get('desig',''), rec.get('from_sttn',''), rec.get('sign_on_time',''),
+                rec.get('to_sttn',''), rec.get('sign_off_time','-'), rec.get('duty_hrs',''), rec.get('route',''),
+                rec.get('loco_no',''), rec.get('train_no',''), rec.get('category',''), 0, synced_at
+            ))
+            inserted += 1
+
+        if i > 0 and i % 25 == 0:
+            conn.commit()
+
+    MISS_THRESHOLD = 2  # missed 2 consecutive syncs (~1hr, given 30-min scraper interval) = treat as signed off
+
+    payload_ids = set(payload.keys())
+    all_db = conn.execute('SELECT crew_id FROM crew_records').fetchall()
+    for i, row in enumerate(all_db):
+        cid = row['crew_id']
+        if cid not in payload_ids:
+            sub = conn.execute(
+                'SELECT id, ingest_miss_count FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1',
+                (cid,)
+            ).fetchone()
+            if sub:
+                new_miss_count = (sub['ingest_miss_count'] or 0) + 1
+                conn.execute('UPDATE crew_submissions SET ingest_miss_count = ? WHERE id = ?', (new_miss_count, sub['id']))
+                if new_miss_count >= MISS_THRESHOLD:
+                    conn.execute('''
+                        UPDATE crew_records
+                        SET sign_off_time = ?, synced_at = ?, is_active = 0
+                        WHERE crew_id = ? AND (sign_off_time IS NULL OR sign_off_time = '' OR sign_off_time = '-')
+                    ''', (synced_at, synced_at, cid))
+                    archive_to_duty_log(conn, cid, has_submission=1)
+            else:
+                archive_to_duty_log(conn, cid, has_submission=0)
+                conn.execute('UPDATE crew_records SET is_active = 0 WHERE crew_id = ?', (cid,))
+        else:
+            conn.execute('UPDATE crew_submissions SET ingest_miss_count = 0 WHERE crew_id = ?', (cid,))
+            
+        if i > 0 and i % 25 == 0:
+            conn.commit()
         
-        conn.commit()
-        conn.close()
+    conn.commit()
+    conn.close()
     # Stamp last successful CMS sync time (shown on admin dashboard)
     scraper_state['last_run'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return jsonify({'status': 'ok', 'inserted': inserted, 'updated': updated, 'protected': skipped})
