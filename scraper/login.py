@@ -75,7 +75,11 @@ if 'GCP_CREDENTIALS_B64' in os.environ:
         f.write(creds_json)
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds_path
 else:
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.path.join(BASE_DIR, 'scraper', 'algebraic-cycle-432817-r8-ae9fa17cac37.json')
+    coolify_creds_path = os.path.join(BASE_DIR, 'scraper', 'gcp-creds.json')
+    if os.path.exists(coolify_creds_path):
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = coolify_creds_path
+    else:
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.path.join(BASE_DIR, 'scraper', 'algebraic-cycle-432817-r8-ae9fa17cac37.json')
 
 COOKIES_FILE = os.path.join(DATA_DIR, 'cookies.json')
 LAST_RUN_FILE = os.path.join(DATA_DIR, 'last_run.txt')
