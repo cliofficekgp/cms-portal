@@ -75,9 +75,14 @@ for i in range(1, 11):
     if env_var in os.environ:
         b64_str = os.environ[env_var].strip()
         b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
-        creds_json = base64.b64decode(b64_str).decode('utf-8')
+        raw_bytes = base64.b64decode(b64_str)
+        try:
+            creds_json = raw_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            creds_json = raw_bytes.decode('utf-16')
+            
         creds_path = os.path.join(DATA_DIR, f'gcp_creds_{i}.json')
-        with open(creds_path, 'w') as f:
+        with open(creds_path, 'w', encoding='utf-8') as f:
             f.write(creds_json)
         try: account_name = json.loads(creds_json).get('project_id', f'account_{i}')
         except: account_name = f'account_{i}'
@@ -88,9 +93,14 @@ if not GCP_CREDENTIALS:
     if 'GCP_CREDENTIALS_B64' in os.environ:
         b64_str = os.environ['GCP_CREDENTIALS_B64'].strip()
         b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
-        creds_json = base64.b64decode(b64_str).decode('utf-8')
+        raw_bytes = base64.b64decode(b64_str)
+        try:
+            creds_json = raw_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            creds_json = raw_bytes.decode('utf-16')
+            
         creds_path = os.path.join(DATA_DIR, 'gcp_creds.json')
-        with open(creds_path, 'w') as f:
+        with open(creds_path, 'w', encoding='utf-8') as f:
             f.write(creds_json)
         try: account_name = json.loads(creds_json).get('project_id', 'legacy_account')
         except: account_name = 'legacy_account'
