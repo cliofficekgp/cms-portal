@@ -506,9 +506,20 @@ def handle_global_error(e):
             print(f"CRITICAL: DB I/O Error detected ({e}). Force restarting container...", flush=True)
             # os._exit(1) exits the process immediately with an error code,
             # triggering Docker/Coolify's auto-restart policy to recover the server.
+            import os
             os._exit(1)
-    # Re-raise for default 500 handling if it's not a critical DB error
-    raise e
+            
+    # Pass through HTTP errors (like 404 Not Found)
+    try:
+        from werkzeug.exceptions import HTTPException
+        if isinstance(e, HTTPException):
+            return e
+    except ImportError:
+        pass
+
+    # Log and return 500 for other unexpected errors
+    print(f"Unhandled Exception: {e}", flush=True)
+    return "Internal Server Error", 500
 
 @app.route('/')
 def index():
