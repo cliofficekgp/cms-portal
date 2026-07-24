@@ -68,19 +68,28 @@ def random_cycle_sleep_seconds(min_minutes=25, max_minutes=35):
 # Setup Paths & APIs
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
+def _decode_gcp_b64(env_var_name):
+    """Decode a base64-encoded GCP JSON credential from an env var, handling encoding quirks."""
+    b64_str = os.environ[env_var_name].strip()
+    b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
+    raw_bytes = base64.b64decode(b64_str)
+    # Strip BOM if present
+    if raw_bytes[:3] == b'\xef\xbb\xbf':  raw_bytes = raw_bytes[3:]   # UTF-8 BOM
+    if raw_bytes[:2] in (b'\xff\xfe', b'\xfe\xff'):  # UTF-16 BOM
+        return raw_bytes.decode('utf-16')
+    for enc in ('utf-8', 'utf-8-sig', 'utf-16', 'latin-1'):
+        try:
+            return raw_bytes.decode(enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return raw_bytes.decode('utf-8', errors='replace')  # absolute last resort
+
 GCP_CREDENTIALS = []
 # Option 1: Load up to 10 base64 environment variables (GCP_CREDENTIALS_B64_1, etc.)
 for i in range(1, 11):
     env_var = f'GCP_CREDENTIALS_B64_{i}'
     if env_var in os.environ:
-        b64_str = os.environ[env_var].strip()
-        b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
-        raw_bytes = base64.b64decode(b64_str)
-        try:
-            creds_json = raw_bytes.decode('utf-8')
-        except UnicodeDecodeError:
-            creds_json = raw_bytes.decode('utf-16')
-            
+        creds_json = _decode_gcp_b64(env_var)
         creds_path = os.path.join(DATA_DIR, f'gcp_creds_{i}.json')
         with open(creds_path, 'w', encoding='utf-8') as f:
             f.write(creds_json)
@@ -91,14 +100,7 @@ for i in range(1, 11):
 # Fallbacks if no numbered variables exist
 if not GCP_CREDENTIALS:
     if 'GCP_CREDENTIALS_B64' in os.environ:
-        b64_str = os.environ['GCP_CREDENTIALS_B64'].strip()
-        b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
-        raw_bytes = base64.b64decode(b64_str)
-        try:
-            creds_json = raw_bytes.decode('utf-8')
-        except UnicodeDecodeError:
-            creds_json = raw_bytes.decode('utf-16')
-            
+        creds_json = _decode_gcp_b64('GCP_CREDENTIALS_B64')
         creds_path = os.path.join(DATA_DIR, 'gcp_creds.json')
         with open(creds_path, 'w', encoding='utf-8') as f:
             f.write(creds_json)
