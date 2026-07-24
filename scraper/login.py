@@ -68,18 +68,42 @@ def random_cycle_sleep_seconds(min_minutes=25, max_minutes=35):
 # Setup Paths & APIs
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
-if 'GCP_CREDENTIALS_B64' in os.environ:
-    creds_json = base64.b64decode(os.environ['GCP_CREDENTIALS_B64']).decode('utf-8')
-    creds_path = os.path.join(DATA_DIR, 'gcp_creds.json')
-    with open(creds_path, 'w') as f:
-        f.write(creds_json)
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds_path
-else:
-    coolify_creds_path = os.path.join(BASE_DIR, 'scraper', 'gcp-creds.json')
-    if os.path.exists(coolify_creds_path):
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = coolify_creds_path
+GCP_CREDENTIALS = []
+# Option 1: Load up to 10 base64 environment variables (GCP_CREDENTIALS_B64_1, etc.)
+for i in range(1, 11):
+    env_var = f'GCP_CREDENTIALS_B64_{i}'
+    if env_var in os.environ:
+        creds_json = base64.b64decode(os.environ[env_var]).decode('utf-8')
+        creds_path = os.path.join(DATA_DIR, f'gcp_creds_{i}.json')
+        with open(creds_path, 'w') as f:
+            f.write(creds_json)
+        try: account_name = json.loads(creds_json).get('project_id', f'account_{i}')
+        except: account_name = f'account_{i}'
+        GCP_CREDENTIALS.append({'path': creds_path, 'name': account_name})
+
+# Fallbacks if no numbered variables exist
+if not GCP_CREDENTIALS:
+    if 'GCP_CREDENTIALS_B64' in os.environ:
+        creds_json = base64.b64decode(os.environ['GCP_CREDENTIALS_B64']).decode('utf-8')
+        creds_path = os.path.join(DATA_DIR, 'gcp_creds.json')
+        with open(creds_path, 'w') as f:
+            f.write(creds_json)
+        try: account_name = json.loads(creds_json).get('project_id', 'legacy_account')
+        except: account_name = 'legacy_account'
+        GCP_CREDENTIALS.append({'path': creds_path, 'name': account_name})
     else:
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.path.join(BASE_DIR, 'scraper', 'algebraic-cycle-432817-r8-ae9fa17cac37.json')
+        coolify_creds_path = os.path.join(BASE_DIR, 'scraper', 'gcp-creds.json')
+        if os.path.exists(coolify_creds_path):
+            try: 
+                with open(coolify_creds_path) as f: account_name = json.load(f).get('project_id', 'coolify_account')
+            except: account_name = 'coolify_account'
+            GCP_CREDENTIALS.append({'path': coolify_creds_path, 'name': account_name})
+        else:
+            default_path = os.path.join(BASE_DIR, 'scraper', 'algebraic-cycle-432817-r8-ae9fa17cac37.json')
+            try: 
+                with open(default_path) as f: account_name = json.load(f).get('project_id', 'default_account')
+            except: account_name = 'default_account'
+            GCP_CREDENTIALS.append({'path': default_path, 'name': account_name})
 
 COOKIES_FILE = os.path.join(DATA_DIR, 'cookies.json')
 LAST_RUN_FILE = os.path.join(DATA_DIR, 'last_run.txt')
@@ -316,9 +340,22 @@ def sync_ta_reports(session_obj):
 def main_loop():
     consecutive_captcha_failures = 0
     consecutive_auth_failures = 0
-    client = vision.ImageAnnotatorClient()
+    
+    active_client = None
+    active_account_name = None
+    last_rotation_date = None
     
     while True:
+        current_date = datetime.datetime.now(IST).date()
+        if last_rotation_date != current_date:
+            active_index = current_date.toordinal() % len(GCP_CREDENTIALS)
+            active_cred = GCP_CREDENTIALS[active_index]
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = active_cred['path']
+            active_client = vision.ImageAnnotatorClient()
+            active_account_name = active_cred['name']
+            last_rotation_date = current_date
+            print(f"[{current_date}] Switched to OCR account: {active_account_name}")
+
         if check_stop_signal():
             print("Stop signal detected. Exiting scraper process gracefully.")
             sys.exit(0)
@@ -449,9 +486,16 @@ def main_loop():
                 consecutive_captcha_failures = 0 # reset on manual input
             else:
                 # Auto OCR
-                send_state_to_admin('running', 'Solving Captcha via OCR...')
+                send_state_to_admin('running', f'Solving Captcha via OCR ({active_account_name})...')
                 image_v = vision.Image(content=img_data)
-                response = client.text_detection(image=image_v)
+                response = active_client.text_detection(image=image_v)
+                
+                # Report OCR usage to backend
+                try:
+                    requests.post(f"{FLASK_API_URL}/ocr_usage", json={'account_name': active_account_name}, headers={'X-API-Secret': API_SECRET}, timeout=5)
+                except Exception as e:
+                    print(f"Failed to report OCR usage: {e}")
+                    
                 texts = response.text_annotations
                 if texts and texts[0].description:
                     for char in texts[0].description:

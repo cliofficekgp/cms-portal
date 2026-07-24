@@ -303,6 +303,16 @@ def init_db():
     cur.execute('CREATE INDEX IF NOT EXISTS idx_duty_log_sign_on ON crew_duty_log (sign_on_time)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_submissions_crew_id ON crew_submissions (crew_id)')
     
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS ocr_usage_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_name TEXT,
+            usage_date TEXT,
+            request_count INTEGER DEFAULT 0,
+            UNIQUE(account_name, usage_date)
+        )
+    ''')
+    
     # Bootstrap default super_admin if no users exist
     user_count = cur.execute('SELECT COUNT(*) FROM users').fetchone()[0]
     if user_count == 0:
@@ -874,8 +884,17 @@ def super_admin():
     conn = get_db()
     users = conn.execute('SELECT id, username, role FROM users').fetchall()
     passcodes = conn.execute('SELECT passcode, is_used FROM signup_passcodes').fetchall()
+    
+    current_month_prefix = datetime.now(IST).strftime('%Y-%m')
+    ocr_usage = conn.execute('''
+        SELECT account_name, SUM(request_count) as total_requests
+        FROM ocr_usage_log
+        WHERE usage_date LIKE ?
+        GROUP BY account_name
+    ''', (f'{current_month_prefix}%',)).fetchall()
+    
     conn.close()
-    return render_template('super_admin_dashboard.html', users=users, passcodes=passcodes)
+    return render_template('super_admin_dashboard.html', users=users, passcodes=passcodes, ocr_usage=ocr_usage)
 
 @app.route('/super_admin/generate_passcode', methods=['POST'])
 @super_admin_required
@@ -2089,6 +2108,30 @@ def api_stations():
     except Exception as e:
         print("Error reading stations:", e)
     return jsonify(stations)
+
+@app.route('/api/ocr_usage', methods=['POST'])
+def api_ocr_usage():
+    auth = request.headers.get('X-API-Secret', '')
+    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True)
+    account_name = payload.get('account_name')
+    if not account_name:
+        return jsonify({'error': 'Missing account_name'}), 400
+
+    usage_date = datetime.now(IST).strftime('%Y-%m-%d')
+    conn = get_db()
+    
+    with DB_WRITE_LOCK:
+        conn.execute('''
+            INSERT INTO ocr_usage_log (account_name, usage_date, request_count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(account_name, usage_date) DO UPDATE SET
+                request_count = request_count + 1
+        ''', (account_name, usage_date))
+        conn.commit()
+    conn.close()
+    return jsonify({'status': 'success'})
 
 @app.route('/api/sync_ta', methods=['POST'])
 def api_sync_ta():
