@@ -540,6 +540,7 @@ def main_loop():
                             if len(result) == 5: break
                 result = result.lower()
             
+            cms_user, cms_pass = '', ''
             try:
                 import sqlite3
                 conn = sqlite3.connect(os.path.join(DATA_DIR, 'crew.db'), timeout=10.0)
@@ -553,6 +554,13 @@ def main_loop():
                 conn.close()
             except Exception as e:
                 print(f"Error reading CMS credentials: {e}")
+
+            if not cms_user or not cms_pass:
+                print("[main_loop] No CMS credentials configured. Skipping login attempt.")
+                send_state_to_admin('error', 'No CMS credentials configured in DB. Please set them in CMS Settings.')
+                driver.quit()
+                interruptible_sleep(30)
+                continue
 
             # Login
             try:
