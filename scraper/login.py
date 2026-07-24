@@ -129,17 +129,37 @@ API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 
-def is_proxy_available(host=None, port=1080, retries=5, delay=2):
+def is_proxy_available(host=None, port=1080, retries=2, delay=2):
+    """Check if the SOCKS proxy port is open AND can actually reach the internet."""
     if host is None:
         host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
+    # Step 1: Check if the SOCKS proxy port is reachable
+    port_open = False
     for attempt in range(retries):
         try:
             with socket.create_connection((host, port), timeout=2):
-                return True
+                port_open = True
+                break
         except OSError:
             if attempt < retries - 1:
                 time.sleep(delay)
-    return False
+    if not port_open:
+        print(f"[Proxy] SOCKS proxy {host}:{port} not reachable. Using direct connection.")
+        return False
+    
+    # Step 2: Test actual internet connectivity through the proxy
+    try:
+        test_session = requests.Session()
+        test_session.proxies = {
+            'http': f'socks5h://{host}:{port}',
+            'https': f'socks5h://{host}:{port}',
+        }
+        test_session.get('https://cms.indianrail.gov.in', timeout=10)
+        print(f"[Proxy] SOCKS proxy {host}:{port} is working. Using proxy.")
+        return True
+    except Exception as e:
+        print(f"[Proxy] SOCKS proxy {host}:{port} port is open but internet test failed: {e}. Using direct connection.")
+        return False
 
 def send_state_to_admin(status, message, action_required=False, action_type='', image_base64=''):
     try:
