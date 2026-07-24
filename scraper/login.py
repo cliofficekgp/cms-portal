@@ -73,7 +73,9 @@ GCP_CREDENTIALS = []
 for i in range(1, 11):
     env_var = f'GCP_CREDENTIALS_B64_{i}'
     if env_var in os.environ:
-        creds_json = base64.b64decode(os.environ[env_var]).decode('utf-8')
+        b64_str = os.environ[env_var].strip()
+        b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
+        creds_json = base64.b64decode(b64_str).decode('utf-8')
         creds_path = os.path.join(DATA_DIR, f'gcp_creds_{i}.json')
         with open(creds_path, 'w') as f:
             f.write(creds_json)
@@ -84,7 +86,9 @@ for i in range(1, 11):
 # Fallbacks if no numbered variables exist
 if not GCP_CREDENTIALS:
     if 'GCP_CREDENTIALS_B64' in os.environ:
-        creds_json = base64.b64decode(os.environ['GCP_CREDENTIALS_B64']).decode('utf-8')
+        b64_str = os.environ['GCP_CREDENTIALS_B64'].strip()
+        b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
+        creds_json = base64.b64decode(b64_str).decode('utf-8')
         creds_path = os.path.join(DATA_DIR, 'gcp_creds.json')
         with open(creds_path, 'w') as f:
             f.write(creds_json)
