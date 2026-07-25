@@ -519,6 +519,9 @@ def main_loop():
             driver.get('https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=login&isResponsive=Y')
             human_delay(2.5, 5.0)  # time for the page to "be looked at" before doing anything
             
+            if "SignerDigitalExtPopupModal" in driver.page_source:
+                raise Exception("CMS_SERVER_DOWN")
+            
             # Handle Session Expire
             if "LOCAL COMPUTER WAS NOT USED" in driver.page_source or "Session Expire Page" in driver.title:
                 try:
@@ -784,7 +787,14 @@ def main_loop():
 
         except Exception as e:
             traceback.print_exc()
-            error_msg = f'Code Error: {type(e).__name__} - {str(e)}'
+            err_str = str(e)
+            if "ERR_CONNECTION_REFUSED" in err_str or "Connection refused" in err_str or "Max retries exceeded" in err_str:
+                error_msg = "Error: Cannot connect to CMS Server. The SOCKS proxy might be offline or the CMS Server is completely down."
+            elif "CMS_SERVER_DOWN" in err_str:
+                error_msg = "Error: CMS Server is down or undergoing maintenance. (Signer.Digital fallback page detected)."
+            else:
+                error_msg = f'Code Error: {type(e).__name__} - {err_str}'
+                
             send_state_to_admin('error', error_msg)
             try: driver.quit()
             except: pass
