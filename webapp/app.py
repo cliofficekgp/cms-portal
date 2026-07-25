@@ -64,7 +64,8 @@ scraper_state = {
     'submitted_value': None,
     'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST'),
     'last_run': None,  # Timestamp of the last successful CMS sync
-    'active_tunnel': 'Unknown'
+    'active_tunnel': 'Unknown',
+    'last_ddddocr_failure': 'Never'
 }
 
 # ---------------------------------------------------------------------------
@@ -921,7 +922,7 @@ def super_admin():
     ''', (f'{current_month_prefix}%',)).fetchall()
     
     conn.close()
-    return render_template('super_admin_dashboard.html', users=users, passcodes=passcodes, ocr_usage=ocr_usage)
+    return render_template('super_admin_dashboard.html', users=users, passcodes=passcodes, ocr_usage=ocr_usage, state=scraper_state)
 
 @app.route('/super_admin/generate_passcode', methods=['POST'])
 @super_admin_required
@@ -1365,6 +1366,9 @@ def update_scraper_state():
         
     if 'active_tunnel' in payload:
         scraper_state['active_tunnel'] = payload['active_tunnel']
+        
+    if 'last_ddddocr_failure' in payload:
+        scraper_state['last_ddddocr_failure'] = payload['last_ddddocr_failure']
     
     scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return jsonify({'success': True})

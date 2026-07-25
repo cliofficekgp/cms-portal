@@ -9,6 +9,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
 from google.cloud import vision
+import ddddocr
+
+try:
+    ocr = ddddocr.DdddOcr(show_ad=False)
+except Exception as e:
+    print(f"Failed to initialize ddddocr: {e}")
+    ocr = None
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
@@ -182,7 +189,7 @@ def is_proxy_available(host, port, retries=2, delay=2):
         print(f"[Proxy] SOCKS proxy {host}:{port} port is open but internet test failed: {e}. Using direct connection.")
         return False
 
-def send_state_to_admin(status, message, action_required=False, action_type='', image_base64=''):
+def send_state_to_admin(status, message, action_required=False, action_type='', image_base64='', last_ddddocr_failure=None):
     global ACTIVE_TUNNEL
     try:
         payload = {
@@ -193,6 +200,8 @@ def send_state_to_admin(status, message, action_required=False, action_type='', 
             'image_base64': image_base64,
             'active_tunnel': ACTIVE_TUNNEL
         }
+        if last_ddddocr_failure:
+            payload['last_ddddocr_failure'] = last_ddddocr_failure
         requests.post(f"{FLASK_API_URL}/scraper/state", json=payload, headers={'X-API-Secret': API_SECRET})
     except Exception as e:
         print(f"Failed to communicate with Admin API: {e}")
@@ -544,24 +553,39 @@ def main_loop():
                     continue
                 consecutive_captcha_failures = 0 # reset on manual input
             else:
-                # Auto OCR
-                send_state_to_admin('running', f'Solving Captcha via OCR ({active_account_name})...')
-                image_v = vision.Image(content=img_data)
-                response = active_client.text_detection(image=image_v)
+                if ocr and consecutive_captcha_failures < 5:
+                    send_state_to_admin('running', f'Solving Captcha via ddddocr (Attempt {consecutive_captcha_failures + 1}/5)...')
+                    try:
+                        res = ocr.classification(img_data)
+                        if res:
+                            # ddddocr sometimes returns weird cases or extra spaces, clean it up
+                            result = res.lower().replace(' ', '')[:5]
+                    except Exception as e:
+                        print(f"ddddocr failed: {e}")
                 
-                # Report OCR usage to backend
-                try:
-                    requests.post(f"{FLASK_API_URL}/ocr_usage", json={'account_name': active_account_name}, headers={'X-API-Secret': API_SECRET}, timeout=5)
-                except Exception as e:
-                    print(f"Failed to report OCR usage: {e}")
+                if not result:
+                    if consecutive_captcha_failures == 5 and ocr:
+                        failure_time = datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+                        send_state_to_admin('running', f'ddddocr failed 5 times, falling back to Google Vision...', last_ddddocr_failure=failure_time)
+                    else:
+                        send_state_to_admin('running', f'Solving Captcha via OCR ({active_account_name})...')
+                        
+                    image_v = vision.Image(content=img_data)
+                    response = active_client.text_detection(image=image_v)
                     
-                texts = response.text_annotations
-                if texts and texts[0].description:
-                    for char in texts[0].description:
-                        if char != " ":
-                            result += char
-                            if len(result) == 5: break
-                result = result.lower()
+                    # Report OCR usage to backend
+                    try:
+                        requests.post(f"{FLASK_API_URL}/ocr_usage", json={'account_name': active_account_name}, headers={'X-API-Secret': API_SECRET}, timeout=5)
+                    except Exception as e:
+                        print(f"Failed to report OCR usage: {e}")
+                        
+                    texts = response.text_annotations
+                    if texts and texts[0].description:
+                        for char in texts[0].description:
+                            if char != " ":
+                                result += char
+                                if len(result) == 5: break
+                    result = result.lower()
             
             cms_user, cms_pass = '', ''
             try:
