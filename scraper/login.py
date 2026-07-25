@@ -152,6 +152,21 @@ def get_active_proxy():
     ACTIVE_TUNNEL = "Offline"
     return None, None
 
+def make_session_with_proxy(cookies=None):
+    """Create a requests.Session configured with the best available proxy.
+    Optionally restore cookies from a list of {name, value} dicts."""
+    proxy_host, proxy_port = get_active_proxy()
+    session = requests.Session()
+    if proxy_host:
+        session.proxies = {
+            'http': f'socks5h://{proxy_host}:{proxy_port}',
+            'https': f'socks5h://{proxy_host}:{proxy_port}',
+        }
+    if cookies:
+        for c in cookies:
+            session.cookies.set(c['name'], c['value'])
+    return session, proxy_host, proxy_port
+
 def is_proxy_available(host, port, retries=2, delay=2):
     """Check if the SOCKS proxy port is open AND can actually reach the internet."""
     # Step 1: Check if the SOCKS proxy port is reachable
@@ -436,39 +451,55 @@ def main_loop():
             
         try:
             send_state_to_admin('starting', 'Checking saved cookies...')
-            # 1. Try saved cookies
+            # 1. Try saved cookies — with tunnel-aware retry
             cookie_valid = False
-            session = requests.Session()
-            proxy_host, proxy_port = get_active_proxy()
-            if proxy_host:
-                session.proxies = {
-                    'http': f'socks5h://{proxy_host}:{proxy_port}',
-                    'https': f'socks5h://{proxy_host}:{proxy_port}',
-                }
+            saved_cookies = []
             if os.path.exists(COOKIES_FILE):
                 with open(COOKIES_FILE, 'r') as cf:
                     saved_cookies = json.load(cf)
-                for cookie in saved_cookies:
-                    session.cookies.set(cookie['name'], cookie['value'])
-                cookie_valid = sync_signon_reports(session)
 
-                # ---------------------------------------------------------------
-                # FIX: sync_ta_reports() used to be called ONLY after a fresh
-                # Selenium login (far below, in the login-flow branch). As long
-                # as saved cookies stayed valid, the code always took this early
-                # "cookie_valid" branch and looped back via `continue` WITHOUT
-                # ever calling sync_ta_reports(). Since valid-cookie reuse is the
-                # common case (that's the entire point of caching cookies), TA
-                # sync was effectively dead code in practice -- confirmed by prod
-                # logs showing /api/sync firing but /api/sync_ta never firing.
-                #
-                # Now TA sync runs on every cycle where the session is valid,
-                # not just immediately after a fresh login.
-                # ---------------------------------------------------------------
-                if cookie_valid:
-                    ta_ok = sync_ta_reports(session)
-                    if not ta_ok:
-                        print("[main_loop] TA sync did not succeed this cycle (see sync_ta_reports logs above).")
+            if saved_cookies:
+                # Try up to twice: once with the best tunnel, once with a re-selected tunnel
+                for tunnel_attempt in range(2):
+                    session, proxy_host, proxy_port = make_session_with_proxy(saved_cookies)
+                    if tunnel_attempt > 0:
+                        send_state_to_admin('running', f'Tunnel switched to {ACTIVE_TUNNEL}, retrying sync...')
+                    try:
+                        cookie_valid = sync_signon_reports(session)
+                        break  # success or session-expired — either way, stop retrying
+                    except requests.exceptions.ConnectionError as ce:
+                        print(f"[Proxy] ConnectionError on tunnel attempt {tunnel_attempt + 1}: {ce}")
+                        send_state_to_admin('running', f'Tunnel {ACTIVE_TUNNEL} lost connectivity, re-testing tunnels...')
+                        if tunnel_attempt == 0:
+                            # Force a re-test by clearing any cached port-open state
+                            time.sleep(3)
+                            continue
+                        else:
+                            # Both attempts failed
+                            send_state_to_admin('error', 'Error: Cannot connect to CMS Server on any tunnel. The SOCKS proxies might be offline or CMS is down.')
+                            if interruptible_sleep(60):
+                                sys.exit(0)
+                            continue
+            
+            proxy_host, proxy_port = ACTIVE_TUNNEL, None  # already set by make_session_with_proxy
+
+            # ---------------------------------------------------------------
+            # FIX: sync_ta_reports() used to be called ONLY after a fresh
+            # Selenium login (far below, in the login-flow branch). As long
+            # as saved cookies stayed valid, the code always took this early
+            # "cookie_valid" branch and looped back via `continue` WITHOUT
+            # ever calling sync_ta_reports(). Since valid-cookie reuse is the
+            # common case (that's the entire point of caching cookies), TA
+            # sync was effectively dead code in practice -- confirmed by prod
+            # logs showing /api/sync firing but /api/sync_ta never firing.
+            #
+            # Now TA sync runs on every cycle where the session is valid,
+            # not just immediately after a fresh login.
+            # ---------------------------------------------------------------
+            if cookie_valid:
+                ta_ok = sync_ta_reports(session)
+                if not ta_ok:
+                    print("[main_loop] TA sync did not succeed this cycle (see sync_ta_reports logs above).")
             
             if cookie_valid:
                 sleep_seconds = random_cycle_sleep_seconds(25, 35)
