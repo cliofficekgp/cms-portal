@@ -165,7 +165,7 @@ def is_proxy_available(host, port, retries=2, delay=2):
             if attempt < retries - 1:
                 time.sleep(delay)
     if not port_open:
-        print(f"[Proxy] SOCKS proxy {host}:{port} not reachable. Using direct connection.")
+        print(f"[Proxy] SOCKS proxy {host}:{port} not reachable.")
         return False
     
     # Step 2: Test actual internet connectivity through the proxy
@@ -175,11 +175,14 @@ def is_proxy_available(host, port, retries=2, delay=2):
             'http': f'socks5h://{host}:{port}',
             'https': f'socks5h://{host}:{port}',
         }
-        test_session.get('https://cms.indianrail.gov.in', timeout=10)
+        resp = test_session.get('https://cms.indianrail.gov.in', timeout=10)
+        if "SignerDigitalExtPopupModal" in resp.text:
+            raise Exception("Fallback page detected (CMS down or unreachable on this tunnel)")
+        
         print(f"[Proxy] SOCKS proxy {host}:{port} is working. Using proxy.")
         return True
     except Exception as e:
-        print(f"[Proxy] SOCKS proxy {host}:{port} port is open but internet test failed: {e}. Using direct connection.")
+        print(f"[Proxy] SOCKS proxy {host}:{port} port is open but internet test failed: {e}")
         return False
 
 def send_state_to_admin(status, message, action_required=False, action_type='', image_base64='', last_ddddocr_failure=None):
