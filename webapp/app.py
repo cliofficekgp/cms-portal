@@ -571,32 +571,47 @@ def form():
     conn = get_db()
     row = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
     crew_data = dict(row) if row else {}
-    
-    # Fetch latest submission to override/populate form fields
-    sub = conn.execute('SELECT * FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1', (crew_id,)).fetchone()
-    if sub:
-        sub_dict = dict(sub)
-        # Override with manual submission data if present
-        for field in ['loco_no', 'train_no', 'bpc_no', 'to_sttn', 'cto_time', 'current_location', 'departure_time', 'relief_datetime']:
-            if sub_dict.get(field):
-                crew_data[field] = sub_dict[field]
-
-    # Fetch admin edits to override both CMS records and crew submissions
-    admin_edits = conn.execute('SELECT field, value, updated_at FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
-    
-    sub_dt = None
-    if sub and sub_dict.get('submitted_at'):
-        sub_dt = parse_dt(sub_dict['submitted_at'])
-        
-    for edit in admin_edits:
-        if edit['value'] is not None and edit['value'].strip() != '':
-            if edit['field'] == 'current_location':
-                admin_dt = parse_dt(edit['updated_at'])
-                # Only override current_location if admin edit is newer than latest submission
-                if not sub_dt or (admin_dt and admin_dt >= sub_dt):
-                    crew_data[edit['field']] = edit['value']
+    if manual:
+        for k in list(crew_data.keys()):
+            if k not in ['crew_id', 'name', 'desig']:
+                crew_data[k] = ''
+    else:
+        # Fetch latest submission to override/populate form fields
+        sub = conn.execute('SELECT * FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1', (crew_id,)).fetchone()
+        sub_dict = {}
+        if sub:
+            sub_dict = dict(sub)
+            if sign_on_match(crew_data.get('sign_on_time'), sub_dict.get('sign_on_time')):
+                # Override with manual submission data if present
+                for field in ['loco_no', 'train_no', 'bpc_no', 'to_sttn', 'cto_time', 'current_location', 'departure_time', 'relief_datetime']:
+                    if sub_dict.get(field):
+                        crew_data[field] = sub_dict[field]
             else:
-                crew_data[edit['field']] = edit['value']
+                sub = None
+                sub_dict = {}
+
+        # Fetch admin edits to override both CMS records and crew submissions
+        admin_edits = conn.execute('SELECT field, value, updated_at FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
+        
+        sub_dt = None
+        if sub and sub_dict.get('submitted_at'):
+            sub_dt = parse_dt(sub_dict['submitted_at'])
+            
+        sign_on_dt = parse_dt(crew_data.get('sign_on_time'))
+            
+        for edit in admin_edits:
+            if edit['value'] is not None and edit['value'].strip() != '':
+                admin_dt = parse_dt(edit['updated_at'])
+                # Ignore admin edits that happened before this duty started
+                if sign_on_dt and admin_dt and admin_dt < sign_on_dt:
+                    continue
+                
+                if edit['field'] == 'current_location':
+                    # Only override current_location if admin edit is newer than latest submission
+                    if not sub_dt or (admin_dt and admin_dt >= sub_dt):
+                        crew_data[edit['field']] = edit['value']
+                else:
+                    crew_data[edit['field']] = edit['value']
                 
     # Format sign_on_time for display in form (readonly field)
     if crew_data.get('sign_on_time') and crew_data['sign_on_time'] != '-':

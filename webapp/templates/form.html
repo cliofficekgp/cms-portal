@@ -82,13 +82,13 @@
               <label class="block text-sm font-medium text-gray-700">Name</label>
               <input type="text" name="name"
                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 border p-2 text-gray-600"
-                value="{{ crew.name if crew else '' }}" {% if crew %}readonly{% endif %} placeholder="Crew Name">
+                value="{{ crew.name if crew else '' }}" {% if crew and not manual %}readonly{% endif %} placeholder="Crew Name">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700">Sign On Time <span class="text-xs text-blue-600 font-normal ml-1 border border-blue-200 bg-blue-50 px-1 rounded">CMS</span></label>
               <input type="text" name="sign_on_time"
                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 border p-2 text-gray-600"
-                value="{{ crew.sign_on_time if crew else '' }}" {% if crew %}readonly{% endif %}
+                value="{{ crew.sign_on_time if crew and not manual else '' }}" {% if crew and not manual %}readonly{% endif %}
                 placeholder="DD-MM-YYYY HH:MM">
             </div>
           </div>
@@ -105,7 +105,7 @@
               <label class="block text-sm font-medium text-gray-700">From Station <span class="text-xs text-blue-600 font-normal ml-1 border border-blue-200 bg-blue-50 px-1 rounded">CMS</span></label>
               <input type="text" name="from_sttn"
                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 border p-2 text-gray-600 uppercase"
-                value="{{ crew.from_sttn if crew else '' }}" {% if crew %}readonly{% endif %}
+                value="{{ crew.from_sttn if crew and not manual else '' }}" {% if crew and not manual %}readonly{% endif %}
                 placeholder="Station Code">
             </div>
             <div>
