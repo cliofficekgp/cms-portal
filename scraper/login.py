@@ -129,21 +129,27 @@ API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 
+ACTIVE_TUNNEL = "Unknown"
+
 def get_active_proxy():
     """Return SOCKS proxy host and port if available, checking Office PC first, then Laptop."""
+    global ACTIVE_TUNNEL
     host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
     
     print("[Proxy] Testing Primary Tunnel (Office PC) on port 1080...", flush=True)
     if is_proxy_available(host, 1080):
         print("[Proxy] Using Office PC proxy on port 1080.", flush=True)
+        ACTIVE_TUNNEL = "Office PC (1080)"
         return host, 1080
         
     print("[Proxy] Primary tunnel failed. Testing Fallback Tunnel (Laptop) on port 1081...", flush=True)
     if is_proxy_available(host, 1081):
         print("[Proxy] Using Laptop proxy on port 1081.", flush=True)
+        ACTIVE_TUNNEL = "Laptop (1081)"
         return host, 1081
         
     print("[Proxy] WARNING: Both tunnels are down. Railway site will be unreachable.", flush=True)
+    ACTIVE_TUNNEL = "Offline"
     return None, None
 
 def is_proxy_available(host, port, retries=2, delay=2):
@@ -177,13 +183,15 @@ def is_proxy_available(host, port, retries=2, delay=2):
         return False
 
 def send_state_to_admin(status, message, action_required=False, action_type='', image_base64=''):
+    global ACTIVE_TUNNEL
     try:
         payload = {
             'status': status,
             'message': message,
             'action_required': action_required,
             'action_type': action_type,
-            'image_base64': image_base64
+            'image_base64': image_base64,
+            'active_tunnel': ACTIVE_TUNNEL
         }
         requests.post(f"{FLASK_API_URL}/scraper/state", json=payload, headers={'X-API-Secret': API_SECRET})
     except Exception as e:

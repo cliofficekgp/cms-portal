@@ -63,7 +63,8 @@ scraper_state = {
     'action_type': '', # 'captcha' or 'otp'
     'submitted_value': None,
     'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST'),
-    'last_run': None  # Timestamp of the last successful CMS sync
+    'last_run': None,  # Timestamp of the last successful CMS sync
+    'active_tunnel': 'Unknown'
 }
 
 # ---------------------------------------------------------------------------
@@ -1361,6 +1362,9 @@ def update_scraper_state():
         scraper_state['action_type'] = payload.get('action_type', '')
         scraper_state['image_base64'] = payload.get('image_base64', '')
         scraper_state['submitted_value'] = None # reset
+        
+    if 'active_tunnel' in payload:
+        scraper_state['active_tunnel'] = payload['active_tunnel']
     
     scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     return jsonify({'success': True})
