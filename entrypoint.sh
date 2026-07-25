@@ -14,7 +14,7 @@ gosu appuser bash -c '
       -o ServerAliveCountMax=3 \
       -o ExitOnForwardFailure=yes \
       -i /home/appuser/.ssh/cms_tunnel_key \
-      hp@100.124.187.97
+      kgplo@100.124.187.97
     echo "[Tunnel-1080] Office PC SSH tunnel dropped, retrying in 5s..."
     sleep 5
   done
