@@ -798,19 +798,26 @@ def main_loop():
             with open(COOKIES_FILE, 'w') as cf:
                 json.dump(new_cookies, cf)
             
-            # Sync
-            session = requests.Session()
-            proxy_host, proxy_port = get_active_proxy()
-            if proxy_host:
-                session.proxies = {
-                    'http': f'socks5h://{proxy_host}:{proxy_port}',
-                    'https': f'socks5h://{proxy_host}:{proxy_port}',
-                }
-            for cookie in new_cookies:
-                session.cookies.set(cookie['name'], cookie['value'])
-            
-            signon_success = sync_signon_reports(session)
-            ta_success = sync_ta_reports(session)
+            # Sync — with tunnel-aware retry (same as cookie path)
+            signon_success = False
+            ta_success = False
+            for tunnel_attempt in range(2):
+                session, proxy_host, proxy_port = make_session_with_proxy(new_cookies)
+                if tunnel_attempt > 0:
+                    send_state_to_admin('running', f'Tunnel switched to {ACTIVE_TUNNEL}, retrying sync after login...')
+                try:
+                    signon_success = sync_signon_reports(session)
+                    ta_success = sync_ta_reports(session)
+                    break  # success — stop retrying
+                except requests.exceptions.ConnectionError as ce:
+                    print(f"[Proxy] Post-login ConnectionError on tunnel attempt {tunnel_attempt + 1}: {ce}")
+                    send_state_to_admin('running', f'Tunnel {ACTIVE_TUNNEL} lost connectivity after login, re-testing tunnels...')
+                    if tunnel_attempt == 0:
+                        time.sleep(3)
+                        continue
+                    else:
+                        send_state_to_admin('error', 'Error: Cannot connect to CMS Server on any tunnel. The SOCKS proxies might be offline or CMS is down.')
+                        break
             
             if signon_success or ta_success:
                 sleep_seconds = random_cycle_sleep_seconds(25, 35)
