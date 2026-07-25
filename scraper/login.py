@@ -129,10 +129,25 @@ API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 
-def is_proxy_available(host=None, port=1080, retries=2, delay=2):
+def get_active_proxy():
+    """Return SOCKS proxy host and port if available, checking Office PC first, then Laptop."""
+    host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
+    
+    print("[Proxy] Testing Primary Tunnel (Office PC) on port 1080...", flush=True)
+    if is_proxy_available(host, 1080):
+        print("[Proxy] Using Office PC proxy on port 1080.", flush=True)
+        return host, 1080
+        
+    print("[Proxy] Primary tunnel failed. Testing Fallback Tunnel (Laptop) on port 1081...", flush=True)
+    if is_proxy_available(host, 1081):
+        print("[Proxy] Using Laptop proxy on port 1081.", flush=True)
+        return host, 1081
+        
+    print("[Proxy] WARNING: Both tunnels are down. Railway site will be unreachable.", flush=True)
+    return None, None
+
+def is_proxy_available(host, port, retries=2, delay=2):
     """Check if the SOCKS proxy port is open AND can actually reach the internet."""
-    if host is None:
-        host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
     # Step 1: Check if the SOCKS proxy port is reachable
     port_open = False
     for attempt in range(retries):
@@ -401,11 +416,11 @@ def main_loop():
             # 1. Try saved cookies
             cookie_valid = False
             session = requests.Session()
-            if is_proxy_available():
-                proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
+            proxy_host, proxy_port = get_active_proxy()
+            if proxy_host:
                 session.proxies = {
-                    'http': f'socks5h://{proxy_host}:1080',
-                    'https': f'socks5h://{proxy_host}:1080',
+                    'http': f'socks5h://{proxy_host}:{proxy_port}',
+                    'https': f'socks5h://{proxy_host}:{proxy_port}',
                 }
             if os.path.exists(COOKIES_FILE):
                 with open(COOKIES_FILE, 'r') as cf:
@@ -457,9 +472,9 @@ def main_loop():
             options.add_argument("--no-first-run")
             options.add_argument("--safebrowsing-disable-auto-update")
             options.add_argument("--js-flags=--max-old-space-size=256")
-            if is_proxy_available():
-                proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
-                options.add_argument(f'--proxy-server=socks5://{proxy_host}:1080')
+            proxy_host, proxy_port = get_active_proxy()
+            if proxy_host:
+                options.add_argument(f'--proxy-server=socks5://{proxy_host}:{proxy_port}')
 
             # Detect Chromium binary path (Linux vs Windows)
             chrome_bin = os.environ.get('CHROME_BIN', '')
@@ -713,11 +728,11 @@ def main_loop():
             
             # Sync
             session = requests.Session()
-            if is_proxy_available():
-                proxy_host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
+            proxy_host, proxy_port = get_active_proxy()
+            if proxy_host:
                 session.proxies = {
-                    'http': f'socks5h://{proxy_host}:1080',
-                    'https': f'socks5h://{proxy_host}:1080',
+                    'http': f'socks5h://{proxy_host}:{proxy_port}',
+                    'https': f'socks5h://{proxy_host}:{proxy_port}',
                 }
             for cookie in new_cookies:
                 session.cookies.set(cookie['name'], cookie['value'])
