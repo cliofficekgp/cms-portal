@@ -9,13 +9,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
 from google.cloud import vision
-import ddddocr
-
-try:
-    ocr = ddddocr.DdddOcr(show_ad=False)
-except Exception as e:
-    print(f"Failed to initialize ddddocr: {e}")
-    ocr = None
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
@@ -412,6 +405,16 @@ def main_loop():
     active_client = None
     active_account_name = None
     last_rotation_date = None
+    
+    # Lazy-load ddddocr to avoid thread/fork deadlocks on startup
+    print("Initializing ddddocr...")
+    try:
+        import ddddocr
+        ocr = ddddocr.DdddOcr(show_ad=False)
+        print("ddddocr initialized successfully.")
+    except Exception as e:
+        print(f"Failed to initialize ddddocr: {e}")
+        ocr = None
     
     while True:
         current_date = datetime.datetime.now(IST).date()

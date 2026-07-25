@@ -83,7 +83,19 @@ def run_scraper_thread():
 
     while True:
         try:
-            if os.path.exists(stop_file) or os.path.exists(fatal_file):
+            if os.path.exists(stop_file):
+                if scraper_state['status'] not in ['cancelled', 'error']:
+                    scraper_state['status'] = 'cancelled'
+                    scraper_state['message'] = 'Scraper is stopped.'
+                import time
+                time.sleep(2)
+                continue
+            
+            if os.path.exists(fatal_file):
+                if scraper_state['status'] not in ['cancelled', 'error']:
+                    scraper_state['status'] = 'error'
+                    with open(fatal_file, 'r') as f:
+                        scraper_state['message'] = f"Fatal Error: {f.read().strip()}. Please fix and trigger manually."
                 import time
                 time.sleep(2)
                 continue
