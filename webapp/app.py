@@ -2134,7 +2134,7 @@ def api_crew_lookup(crew_id):
 @app.route('/api/stations', methods=['GET'])
 def api_stations():
     stations = []
-    csv_path = os.path.join(BASE_DIR, 'data', '01_station_code.csv')
+    csv_path = os.path.join(BASE_DIR, 'webapp', '01_station_code.csv')
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
