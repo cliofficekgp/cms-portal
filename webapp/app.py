@@ -1946,6 +1946,10 @@ def api_admin_edit():
     if not crew_id or field not in ALLOWED_FIELDS:
         return jsonify({'status': 'error', 'message': 'Invalid field or crew_id'}), 400
 
+    if field == 'loco_no':
+        import re
+        value = re.sub(r'[^0-9,]', '', value)
+
     conn = get_db()
 
     # If location is explicitly being removed, freeze the PDD calculation BEFORE saving

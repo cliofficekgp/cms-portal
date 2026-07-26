@@ -642,7 +642,23 @@ document.querySelectorAll('.editable').forEach(el => {
         markFieldDirty(crew, field, () => el.textContent.trim().toUpperCase());
     });
     el.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); return; }
+        
+        // Strict validation for loco_no: only allow digits and comma
+        if (el.dataset.field === 'loco_no') {
+            if (e.ctrlKey || e.metaKey || e.key.length > 1) return; // Allow controls/nav
+            if (!/^[0-9,]$/.test(e.key)) {
+                e.preventDefault();
+            }
+        }
+    });
+    el.addEventListener('paste', e => {
+        if (el.dataset.field === 'loco_no') {
+            e.preventDefault();
+            let paste = (e.clipboardData || window.clipboardData).getData('text');
+            paste = paste.replace(/[^0-9,]/g, '');
+            document.execCommand("insertText", false, paste);
+        }
     });
 });
 
