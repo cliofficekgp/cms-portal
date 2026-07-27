@@ -268,8 +268,38 @@ def _recover_wal_if_needed():
             os.remove(shm_path)
         except: pass
 
+def recover_db_if_malformed(db_path):
+    try:
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        res = conn.execute("PRAGMA integrity_check;").fetchone()
+        conn.close()
+        if res and res[0].lower() == 'ok':
+            return
+    except Exception:
+        pass
+        
+    print("[DB] WARNING: Database is malformed! Attempting automated recovery via iterdump...")
+    import tempfile, shutil, time
+    try:
+        conn = sqlite3.connect(db_path)
+        dump_sql = ""
+        for line in conn.iterdump():
+            dump_sql += line + "\n"
+        conn.close()
+        
+        backup_path = db_path + f".corrupted.{int(time.time())}"
+        shutil.move(db_path, backup_path)
+        
+        conn2 = sqlite3.connect(db_path)
+        conn2.executescript(dump_sql)
+        conn2.close()
+        print(f"[DB] Recovery successful. Corrupted file backed up to {backup_path}")
+    except Exception as e:
+        print(f"[DB] Automated recovery failed: {e}")
+
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    recover_db_if_malformed(DB_PATH)
     _recover_wal_if_needed()
     conn = get_db()
     cur = conn.cursor()
@@ -1628,19 +1658,38 @@ def get_active_locos():
     mapping = {}
     
     try:
-        data, _, _, _, _ = _get_crew_list_data(conn)
-        for row in data:
-            if row.get('is_relief') == 1: continue
-            
-            src_loco = row.get('_src', {}).get('loco_no', 'none')
-            if src_loco == 'cms' or src_loco == 'none': continue
-            
-            loco_str = row.get('loco_no')
+        # Fast, read-only query to get locos from submissions and admin edits.
+        # Ignores crews where is_relief = 1 or loco comes only from crew_records (CMS blue).
+        query = '''
+        SELECT 
+            r.crew_id,
+            COALESCE(a_loco.value, s.loco_no) AS loco_no,
+            COALESCE(a_relief.value, s.is_relief, 0) AS is_relief
+        FROM crew_records r
+        LEFT JOIN (
+            SELECT crew_id, loco_no, is_relief FROM crew_submissions 
+            WHERE id IN (SELECT MAX(id) FROM crew_submissions GROUP BY crew_id)
+        ) s ON r.crew_id = s.crew_id
+        LEFT JOIN (
+            SELECT crew_id, value FROM admin_edits WHERE field = 'loco_no'
+        ) a_loco ON r.crew_id = a_loco.crew_id
+        LEFT JOIN (
+            SELECT crew_id, value FROM admin_edits WHERE field = 'is_relief'
+        ) a_relief ON r.crew_id = a_relief.crew_id
+        WHERE r.is_active = 1 
+          AND (s.loco_no IS NOT NULL OR a_loco.value IS NOT NULL)
+        '''
+        rows = conn.execute(query).fetchall()
+        
+        for r in rows:
+            if int(r['is_relief'] or 0) == 1:
+                continue
+            loco_str = r['loco_no']
             if loco_str and loco_str not in ('', '-'):
                 for l in loco_str.split(','):
                     l = l.strip()
                     if l:
-                        mapping[l] = row['crew_id']
+                        mapping[l] = r['crew_id']
                         locos.add(l)
     except Exception as e:
         print(f"Error in active_locos: {e}")
@@ -1701,21 +1750,22 @@ def sync_loco_location():
 
 def _get_crew_list_data(conn):
     # Mark signed off crews as inactive
-    conn.execute('''
-        UPDATE crew_records 
-        SET is_active = 0 
-        WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
-    ''')
-    conn.execute('''
-        UPDATE crew_submissions 
-        SET is_active = 0 
-        WHERE is_active = 1 
-        AND crew_id IN (
-            SELECT crew_id FROM crew_records 
-            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
-        )
-    ''')
-    conn.commit()
+    with DB_WRITE_LOCK:
+        conn.execute('''
+            UPDATE crew_records 
+            SET is_active = 0 
+            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
+        ''')
+        conn.execute('''
+            UPDATE crew_submissions 
+            SET is_active = 0 
+            WHERE is_active = 1 
+            AND crew_id IN (
+                SELECT crew_id FROM crew_records 
+                WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
+            )
+        ''')
+        conn.commit()
 
     query = '''
     SELECT 
@@ -2099,26 +2149,28 @@ def _get_crew_list_data(conn):
     # --- Execute all deferred DB cleanup in one batch using the single conn ---
     try:
         updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-        for cid, pdd_val in _freeze_pdd:
-            conn.execute('''
-                INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                VALUES (?, 'frozen_pdd', ?, ?)
-                ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-            ''', (cid, pdd_val, updated_at_freeze))
-                
-        for cid, field in _del_admin_edits:
-            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
-        for cid in _del_submissions:
-            conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (cid,))
-        for cid in _del_loc_admin:
-            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (cid,))
-        for cid in _null_loc_sub:
-            conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (cid,))
-        for cid in _del_relief_admin:
-            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (cid,))
-        for cid in _null_relief_sub:
-            conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (cid,))
-        conn.commit()
+        with DB_WRITE_LOCK:
+            for cid, pdd_val in _freeze_pdd:
+                if pdd_val is not None:
+                    conn.execute('''
+                        INSERT INTO admin_edits (crew_id, field, value, updated_at)
+                        VALUES (?, 'frozen_pdd', ?, ?)
+                        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                    ''', (cid, pdd_val, updated_at_freeze))
+                    
+            for cid, field in _del_admin_edits:
+                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
+            for cid in _del_submissions:
+                conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (cid,))
+            for cid in _del_loc_admin:
+                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (cid,))
+            for cid in _null_loc_sub:
+                conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (cid,))
+            for cid in _del_relief_admin:
+                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (cid,))
+            for cid in _null_relief_sub:
+                conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (cid,))
+            conn.commit()
     except Exception as e:
         print(f"Deferred cleanup error: {e}")
     finally:
@@ -2223,8 +2275,9 @@ def _get_crew_list_data(conn):
                                     # We queue an admin edit so it persists to DB!
                                     _freeze_pdd.append((row['crew_id'], None)) # Dummy value to signal we should save departure_time
                                     updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-                                    conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], new_dep, updated_at_freeze))
-                                    conn.commit()
+                                    with DB_WRITE_LOCK:
+                                        conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], new_dep, updated_at_freeze))
+                                        conn.commit()
 
     return data, total_signon, total_10_hrs, total_12_hrs, rtis_locations
 
