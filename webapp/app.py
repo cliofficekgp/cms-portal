@@ -1699,11 +1699,7 @@ def sync_loco_location():
     conn.close()
     return jsonify({'success': True})
 
-@app.route('/crew_list')
-@login_required
 def _get_crew_list_data(conn):
-    # Mark signed off crews as inactive
-    
     # Mark signed off crews as inactive
     conn.execute('''
         UPDATE crew_records 
