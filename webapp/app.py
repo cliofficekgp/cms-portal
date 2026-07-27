@@ -1623,22 +1623,27 @@ def get_active_locos():
     auth = request.headers.get('X-API-Secret', '')
     if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
     
-    conn = get_db()
-    # Get active loco numbers from crew_records and crew_submissions
-    # Filter out empty or dash
     locos = set()
-    rows1 = conn.execute("SELECT loco_no, crew_id FROM crew_records WHERE is_active = 1 AND loco_no != '' AND loco_no != '-'").fetchall()
-    rows2 = conn.execute("SELECT loco_no, crew_id FROM crew_submissions WHERE is_active = 1 AND loco_no != '' AND loco_no != '-'").fetchall()
-    
     mapping = {}
-    for r in rows1 + rows2:
-        loco = r['loco_no']
-        # handle multiple locos separated by comma
-        for l in loco.split(','):
-            l = l.strip()
-            if l:
-                mapping[l] = r['crew_id']
-                locos.add(l)
+    
+    try:
+        data, _, _, _, _ = _get_crew_list_data(conn)
+        for row in data:
+            if row.get('is_relief') == 1: continue
+            
+            src_loco = row.get('_src', {}).get('loco_no', 'none')
+            if src_loco == 'cms' or src_loco == 'none': continue
+            
+            loco_str = row.get('loco_no')
+            if loco_str and loco_str not in ('', '-'):
+                for l in loco_str.split(','):
+                    l = l.strip()
+                    if l:
+                        mapping[l] = row['crew_id']
+                        locos.add(l)
+    except Exception as e:
+        print(f"Error in active_locos: {e}")
+        
     conn.close()
     return jsonify({'locos': list(locos), 'mapping': mapping})
 
@@ -1662,16 +1667,20 @@ def sync_loco_location():
     now_str = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     
     # Check if exists
-    existing = conn.execute('SELECT latitude, longitude FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
+    existing = conn.execute('SELECT latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
     
     if existing:
+        # Only update updated_at if location has physically changed (dist > 100m) or name changed
+        loc_changed = moved or (existing['location_name'] != loc_name)
+        new_updated_at = now_str if loc_changed else existing['updated_at']
+        
         conn.execute('''
             UPDATE loco_locations 
             SET crew_id = ?, prev_latitude = ?, prev_longitude = ?, 
                 latitude = ?, longitude = ?, location_name = ?, 
                 same_as_previous = ?, updated_at = ?
             WHERE loco_no = ?
-        ''', (crew_id, existing['latitude'], existing['longitude'], lat, lon, loc_name, 0 if moved else 1, now_str, loco_no))
+        ''', (crew_id, existing['latitude'], existing['longitude'], lat, lon, loc_name, 0 if loc_changed else 1, new_updated_at, loco_no))
     else:
         conn.execute('''
             INSERT INTO loco_locations (loco_no, crew_id, latitude, longitude, location_name, prev_latitude, prev_longitude, same_as_previous, updated_at, created_at)
@@ -1691,9 +1700,8 @@ def sync_loco_location():
 
 @app.route('/crew_list')
 @login_required
-def crew_list():
-    conn = get_db()
-    # Full join of records and submissions
+def _get_crew_list_data(conn):
+    # Mark signed off crews as inactive
     
     # Mark signed off crews as inactive
     conn.execute('''
@@ -1870,6 +1878,8 @@ def crew_list():
                 src[field] = 'cms'
             else:
                 src[field] = 'none'
+
+        row['_src'] = src
 
         for field in ['bpc_no', 'cto_time', 'departure_time']:
             if field in crew_admin_edits and crew_admin_edits[field] is not None:
@@ -2154,6 +2164,10 @@ def crew_list():
         if row.get('is_relief') == 1:
             continue
             
+        # Skip RTIS check if loco_no came strictly from CMS
+        if row.get('_src', {}).get('loco_no') == 'cms':
+            continue
+            
         loco_no_str = row.get('loco_no')
         if loco_no_str:
             locos = [l.strip() for l in loco_no_str.split(',') if l.strip()]
@@ -2193,6 +2207,36 @@ def crew_list():
                         row['current_location'] = loc_str
                         row['is_rtis_location'] = True
                         row['_loc_update_time'] = latest_time.strftime('%H:%M') if latest_time else latest_loc['time']
+                        
+                        # Auto-freeze PDD if RTIS time is after CTO time
+                        cto_time_str = row.get('cto_time')
+                        if cto_time_str and cto_time_str not in ['-', '–']:
+                            cto_dt = parse_dt(cto_time_str)
+                            # Only if the train has departed (location is not the starting station)
+                            # Actually, latest_time > cto_dt means the train has physically updated its location after CTO
+                            if cto_dt and latest_time and latest_time > cto_dt:
+                                # We freeze it by setting departure_time to the RTIS time
+                                # only if departure_time is not already set by manual intervention
+                                if not row.get('departure_time') or row['departure_time'] in ['-', '–']:
+                                    new_dep = latest_time.strftime('%d/%m/%y %H:%M')
+                                    row['departure_time'] = new_dep
+                                    _del_loc_admin.append(row['crew_id'])
+                                    _null_loc_sub.append(row['crew_id'])
+                                    # Since departure_time is now set, PDD logic will freeze it naturally below
+                                    # We queue an admin edit so it persists to DB!
+                                    _freeze_pdd.append((row['crew_id'], None)) # Dummy value to signal we should save departure_time
+                                    updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+                                    conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], new_dep, updated_at_freeze))
+                                    conn.commit()
+
+    return data, total_signon, total_10_hrs, total_12_hrs, rtis_locations
+
+@app.route('/crew_list')
+@login_required
+def crew_list():
+    conn = get_db()
+    data, total_signon, total_10_hrs, total_12_hrs, rtis_locations = _get_crew_list_data(conn)
+    conn.close()
 
     return render_template('crew_list.html', 
                            crew_list=data,
