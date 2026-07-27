@@ -192,7 +192,28 @@ def main_loop():
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--window-size=1280,800')
-            driver = webdriver.Chrome(options=options)
+
+            # Detect Chromium binary path (Linux vs Windows)
+            chrome_bin = os.environ.get('CHROME_BIN', '')
+            if not chrome_bin:
+                for candidate in [
+                    '/usr/bin/chromium-browser',   # Ubuntu (Oracle Cloud)
+                    '/usr/bin/chromium',            # Debian/other Linux
+                    '/usr/bin/google-chrome',       # Google Chrome on Linux
+                ]:
+                    if os.path.exists(candidate):
+                        chrome_bin = candidate
+                        break
+            if chrome_bin:
+                options.binary_location = chrome_bin
+
+            # Detect chromedriver path
+            chromedriver_path = os.environ.get('CHROMEDRIVER_PATH', '')
+            if chromedriver_path:
+                from selenium.webdriver.chrome.service import Service
+                driver = webdriver.Chrome(service=Service(chromedriver_path), options=options)
+            else:
+                driver = webdriver.Chrome(options=options)
             driver.set_page_load_timeout(45)
 
             # 2. Login Page & Captcha
