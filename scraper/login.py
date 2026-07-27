@@ -148,8 +148,13 @@ def get_active_proxy():
         ACTIVE_TUNNEL = "Laptop (1081)"
         return host, 1081
         
-    print("[Proxy] WARNING: Both tunnels are down. Railway site will be unreachable.", flush=True)
-    ACTIVE_TUNNEL = "Offline"
+    if os.environ.get('ENV', 'local').lower() == 'production':
+        print("[Proxy] WARNING: Both tunnels are down. Production environment detected. Blocking direct connection.", flush=True)
+        ACTIVE_TUNNEL = "Offline"
+        return None, None
+        
+    print("[Proxy] WARNING: Both tunnels are down. Local environment detected. Attempting direct connection...", flush=True)
+    ACTIVE_TUNNEL = "Direct (No Proxy)"
     return None, None
 
 def make_session_with_proxy(cookies=None):
@@ -200,7 +205,7 @@ def is_proxy_available(host, port, retries=2, delay=2):
         print(f"[Proxy] SOCKS proxy {host}:{port} port is open but internet test failed: {e}")
         return False
 
-def send_state_to_admin(status, message, action_required=False, action_type='', image_base64='', last_ddddocr_failure=None):
+def send_state_to_admin(status, message, action_required=False, action_type='', image_base64='', last_ddddocr_failure=None, phone_number=None):
     global ACTIVE_TUNNEL
     try:
         payload = {
@@ -211,6 +216,8 @@ def send_state_to_admin(status, message, action_required=False, action_type='', 
             'image_base64': image_base64,
             'active_tunnel': ACTIVE_TUNNEL
         }
+        if phone_number:
+            payload['phone_number'] = phone_number
         if last_ddddocr_failure:
             payload['last_ddddocr_failure'] = last_ddddocr_failure
         requests.post(f"{FLASK_API_URL}/scraper/state", json=payload, headers={'X-API-Secret': API_SECRET})
@@ -527,6 +534,11 @@ def main_loop():
             options.add_argument("--safebrowsing-disable-auto-update")
             options.add_argument("--js-flags=--max-old-space-size=256")
             proxy_host, proxy_port = get_active_proxy()
+            if not proxy_host and ACTIVE_TUNNEL == "Offline":
+                send_state_to_admin('error', 'Error: Cannot connect to CMS Server. Production environment blocks direct connections.')
+                if interruptible_sleep(60):
+                    sys.exit(0)
+                continue
             if proxy_host:
                 options.add_argument(f'--proxy-server=socks5://{proxy_host}:{proxy_port}')
 
@@ -747,7 +759,10 @@ def main_loop():
                         
                 if not otp_val:
                     # OTP Flow
-                    send_state_to_admin('waiting_for_otp', 'OTP required. Please check registered mobile.', True, 'otp')
+                    import re
+                    phone_match = re.search(r'Enter OTP sent to \+91[X\*]*(\d{4})', source)
+                    phone_number = f"Ending in {phone_match.group(1)}" if phone_match else None
+                    send_state_to_admin('waiting_for_otp', 'OTP required. Please check registered mobile.', True, 'otp', phone_number=phone_number)
                     otp_val = wait_for_admin_input(300)
                     if not otp_val:
                         driver.quit()

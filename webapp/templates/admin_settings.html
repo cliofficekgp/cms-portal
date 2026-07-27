@@ -59,6 +59,28 @@
                 </div>
             </div>
 
+            <!-- RTIS Credentials Card -->
+            <div class="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
+                    <h2 class="text-lg font-semibold text-gray-800">Scraper RTIS Credentials</h2>
+                    <p class="text-sm text-gray-500 mt-1">Update the login details used by the RTIS background scraper.</p>
+                </div>
+                <div class="p-6 space-y-5">
+                    <div>
+                        <label for="rtis_username" class="block text-sm font-medium text-gray-700">RTIS Username</label>
+                        <input type="text" name="rtis_username" id="rtis_username"
+                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2 border"
+                            value="{{ settings.rtis_username if settings else '' }}">
+                    </div>
+                    <div>
+                        <label for="rtis_password" class="block text-sm font-medium text-gray-700">RTIS Password</label>
+                        <input type="password" name="rtis_password" id="rtis_password"
+                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2 border"
+                            value="{{ settings.rtis_password if settings else '' }}">
+                    </div>
+                </div>
+            </div>
+
             <!-- Manual Entry Toggle Card -->
             <div class="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
                 <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">

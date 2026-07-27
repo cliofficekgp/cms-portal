@@ -417,6 +417,12 @@
                     <td class="src-{{ src.loco_no }} td-center">
                         <span class="editable" contenteditable="true"
                               data-field="loco_no" data-crew="{{ crew.crew_id }}">{{ crew.loco_no if crew.loco_no else '' }}</span>
+                        {% if crew._latest_rtis_loco %}
+                            <div style="font-size: 9px; color: #60a5fa; margin-top: 2px; line-height: 1.1; display: flex; align-items: center; justify-content: center; gap: 2px;" title="RTIS Updated: {{ crew._latest_rtis_loco.time }}&#10;Lat: {{ crew._latest_rtis_loco.lat }}&#10;Lon: {{ crew._latest_rtis_loco.lon }}">
+                                <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                {{ crew._latest_rtis_loco.loc }}
+                            </div>
+                        {% endif %}
                     </td>
 
                     <!-- Train No (editable) -->
@@ -437,12 +443,13 @@
                             <input type="text" class="ac-input"
                                    data-field="current_location" data-crew="{{ crew.crew_id }}"
                                    value="{{ crew.current_location if crew.current_location else '' }}"
-                                   placeholder="Stn" autocomplete="off" maxlength="10">
+                                   placeholder="Stn" autocomplete="off" maxlength="10"
+                                   {% if crew.is_rtis_location %}style="color: #60a5fa; font-weight: 700; background: rgba(96,165,250,0.1);"{% endif %}>
                             <div class="ac-dropdown"></div>
                         </div>
                         {% if crew._loc_update_time %}
                         <div class="location-time" style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
-                            {{ crew._loc_update_time.split(' ')[1] if ' ' in crew._loc_update_time else crew._loc_update_time }}
+                            {{ crew._loc_update_time }}
                         </div>
                         {% endif %}
                     </td>

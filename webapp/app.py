@@ -54,6 +54,48 @@ def parse_dt(val):
             pass
     return None
 
+import math
+
+# Load stations on startup
+stations_list = []
+def load_stations():
+    global stations_list
+    stations_path = os.path.join(BASE_DIR, 'data', '01_station_code.csv')
+    try:
+        import csv
+        with open(stations_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    lat = float(row['lat'])
+                    lon = float(row['long'])
+                    stations_list.append({
+                        'code': row['code'],
+                        'lat': lat,
+                        'lon': lon
+                    })
+                except (ValueError, KeyError):
+                    pass
+    except Exception as e:
+        print(f"Failed to load stations: {e}")
+
+load_stations()
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def get_nearest_station(lat, lon):
+    if not stations_list:
+        return ""
+    nearest = min(stations_list, key=lambda s: haversine(lat, lon, s['lat'], s['lon']))
+    return nearest['code']
+
 # Global state for scraper
 scraper_state = {
     'status': 'starting',
@@ -64,6 +106,20 @@ scraper_state = {
     'submitted_value': None,
     'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST'),
     'last_run': None,  # Timestamp of the last successful CMS sync
+    'active_tunnel': 'Unknown',
+    'last_ddddocr_failure': 'Never'
+}
+
+# Global state for RTIS scraper
+rtis_state = {
+    'status': 'starting',
+    'message': 'Initializing RTIS background thread...',
+    'image_base64': '',
+    'action_required': False,
+    'action_type': '', # 'captcha' or 'otp'
+    'submitted_value': None,
+    'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST'),
+    'last_run': None,  # Timestamp of the last successful RTIS sync
     'active_tunnel': 'Unknown',
     'last_ddddocr_failure': 'Never'
 }
@@ -118,6 +174,60 @@ def run_scraper_thread():
                     time.sleep(2)
         except Exception as e:
             print(f"[Thread] Scraper thread exception: {e}")
+            import time
+            time.sleep(30)
+
+
+# ---------------------------------------------------------------------------
+# Background RTIS Thread
+# ---------------------------------------------------------------------------
+
+def run_rtis_thread():
+    rtis_script = os.path.join(BASE_DIR, 'scraper', 'rtis_scraper.py')
+    python_exe = sys.executable
+    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
+    fatal_file = os.path.join(BASE_DIR, 'data', 'rtis_fatal_error.txt')
+    
+    global rtis_process
+    rtis_process = None
+
+    while True:
+        try:
+            if os.path.exists(stop_file):
+                if rtis_state['status'] not in ['cancelled', 'error']:
+                    rtis_state['status'] = 'cancelled'
+                    rtis_state['message'] = 'RTIS Scraper is stopped.'
+                import time
+                time.sleep(2)
+                continue
+            
+            if os.path.exists(fatal_file):
+                if rtis_state['status'] not in ['cancelled', 'error']:
+                    rtis_state['status'] = 'error'
+                    with open(fatal_file, 'r') as f:
+                        rtis_state['message'] = f"Fatal Error: {f.read().strip()}. Please fix and trigger manually."
+                import time
+                time.sleep(2)
+                continue
+
+            print("[Thread] Starting RTIS scraper subprocess...")
+            rtis_state['status'] = 'running'
+            rtis_state['message'] = 'RTIS Scraper subprocess starting...'
+            rtis_process = subprocess.Popen([python_exe, rtis_script], cwd=os.path.join(BASE_DIR, 'scraper'))
+            
+            rtis_process.wait()
+            rtis_process = None
+
+            # Only sleep 30s and restart if it wasn't intentionally stopped
+            if not os.path.exists(stop_file) and not os.path.exists(fatal_file):
+                print("[Thread] RTIS Scraper subprocess exited. Restarting in 30 seconds...")
+                import time
+                for _ in range(15): # Check for stop condition during the 30s sleep
+                    if os.path.exists(stop_file) or os.path.exists(fatal_file):
+                        break
+                    time.sleep(2)
+        except Exception as e:
+            print(f"[Thread] RTIS Scraper thread exception: {e}")
             import time
             time.sleep(30)
 
@@ -258,7 +368,9 @@ def init_db():
             id                  INTEGER PRIMARY KEY,
             cms_username        TEXT,
             cms_password        TEXT,
-            allow_manual_entry  INTEGER DEFAULT 1
+            allow_manual_entry  INTEGER DEFAULT 1,
+            rtis_username       TEXT DEFAULT '',
+            rtis_password       TEXT DEFAULT ''
         )
     ''')
 
@@ -267,6 +379,14 @@ def init_db():
         cur.execute('ALTER TABLE cms_settings ADD COLUMN allow_manual_entry INTEGER DEFAULT 1')
     except sqlite3.OperationalError:
         pass  # Column already exists
+
+    # Migration: add rtis columns to existing DBs
+    try:
+        cur.execute("ALTER TABLE cms_settings ADD COLUMN rtis_username TEXT DEFAULT ''")
+        cur.execute("ALTER TABLE cms_settings ADD COLUMN rtis_password TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
 
     row_count = cur.execute('SELECT COUNT(*) FROM cms_settings').fetchone()[0]
     if row_count == 0:
@@ -293,6 +413,21 @@ def init_db():
             passcode TEXT UNIQUE,
             created_by INTEGER,
             is_used INTEGER DEFAULT 0
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS loco_locations (
+            loco_no         TEXT PRIMARY KEY,
+            crew_id         TEXT,
+            latitude        REAL,
+            longitude       REAL,
+            location_name   TEXT,
+            prev_latitude   REAL,
+            prev_longitude  REAL,
+            same_as_previous INTEGER DEFAULT 1,
+            updated_at      TEXT,
+            created_at      TEXT
         )
     ''')
 
@@ -421,11 +556,16 @@ def run_cleanup_thread():
 # ---------------------------------------------------------------------------
 # Start background threads (here so get_db/init_db are already defined)
 # ---------------------------------------------------------------------------
-scraper_thread = threading.Thread(target=run_scraper_thread, daemon=True)
-scraper_thread.start()
+if not os.environ.get("WERKZEUG_RUN_MAIN"):
+    import threading
+    scraper_thread = threading.Thread(target=run_scraper_thread, daemon=True)
+    scraper_thread.start()
+    
+    rtis_thread = threading.Thread(target=run_rtis_thread, daemon=True)
+    rtis_thread.start()
 
-cleanup_thread = threading.Thread(target=run_cleanup_thread, daemon=True)
-cleanup_thread.start()
+    cleanup_thread = threading.Thread(target=run_cleanup_thread, daemon=True)
+    cleanup_thread.start()
 
 def login_required(f):
     @wraps(f)
@@ -965,7 +1105,7 @@ def reset_user_password(user_id):
 @app.route('/admin')
 @login_required
 def admin():
-    return render_template('admin.html', state=scraper_state)
+    return render_template('admin.html', state=scraper_state, rtis_state=rtis_state)
 
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
@@ -973,14 +1113,17 @@ def admin_settings():
     if request.method == 'POST':
         cms_user = request.form.get('cms_username', '').strip()
         cms_pass = request.form.get('cms_password', '').strip()
+        rtis_user = request.form.get('rtis_username', '').strip()
+        rtis_pass = request.form.get('rtis_password', '').strip()
         # Checkbox: present = 1, absent = 0
         allow_manual = 1 if request.form.get('allow_manual_entry') == 'on' else 0
+        
         if cms_user and cms_pass:
             conn = get_db()
             try:
                 conn.execute(
-                    'UPDATE cms_settings SET cms_username = ?, cms_password = ?, allow_manual_entry = ? WHERE id = 1',
-                    (cms_user, cms_pass, allow_manual)
+                    'UPDATE cms_settings SET cms_username = ?, cms_password = ?, allow_manual_entry = ?, rtis_username = ?, rtis_password = ? WHERE id = 1',
+                    (cms_user, cms_pass, allow_manual, rtis_user, rtis_pass)
                 )
                 conn.commit()
                 flash('Settings saved successfully.', 'success')
@@ -990,9 +1133,10 @@ def admin_settings():
                 conn.close()
             return redirect(url_for('admin_settings'))
         else:
-            flash('Both username and password are required.', 'error')
+            flash('Both CMS username and password are required.', 'error')
+    
     conn = get_db()
-    row = conn.execute('SELECT cms_username, cms_password, allow_manual_entry FROM cms_settings WHERE id = 1').fetchone()
+    row = conn.execute('SELECT cms_username, cms_password, allow_manual_entry, rtis_username, rtis_password FROM cms_settings WHERE id = 1').fetchone()
     conn.close()
     return render_template('admin_settings.html', settings=row)
 
@@ -1374,6 +1518,7 @@ def update_scraper_state():
         scraper_state['action_required'] = payload['action_required']
         scraper_state['action_type'] = payload.get('action_type', '')
         scraper_state['image_base64'] = payload.get('image_base64', '')
+        scraper_state['phone_number'] = payload.get('phone_number')
         scraper_state['submitted_value'] = None # reset
         
     if 'active_tunnel' in payload:
@@ -1393,6 +1538,156 @@ def get_scraper_action():
     return jsonify({
         'submitted_value': scraper_state.get('submitted_value')
     })
+
+# ---------------------------------------------------------------------------
+# RTIS Scraper Admin & API Endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/admin/rtis/submit_action', methods=['POST'])
+@login_required
+def rtis_submit_action():
+    action_value = request.form.get('action_value', '').strip()
+    if action_value:
+        rtis_state['submitted_value'] = action_value
+        rtis_state['action_required'] = False
+        rtis_state['message'] = 'Action submitted. Waiting for RTIS scraper to process...'
+        rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return redirect(url_for('admin'))
+
+@app.route('/admin/rtis/trigger', methods=['POST'])
+@login_required
+def rtis_trigger():
+    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
+    fatal_file = os.path.join(BASE_DIR, 'data', 'rtis_fatal_error.txt')
+    if os.path.exists(stop_file): os.remove(stop_file)
+    if os.path.exists(fatal_file): os.remove(fatal_file)
+    rtis_state['status'] = 'starting'
+    rtis_state['message'] = 'Manual RTIS trigger initiated...'
+    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return redirect(url_for('admin'))
+
+@app.route('/admin/rtis/cancel', methods=['POST'])
+@login_required
+def rtis_cancel():
+    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
+    with open(stop_file, 'w') as f: f.write('stop')
+    rtis_state['status'] = 'cancelled'
+    rtis_state['message'] = 'Stopping RTIS scraper gracefully...'
+    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return redirect(url_for('admin'))
+
+@app.route('/admin/rtis/run_now', methods=['POST'])
+@login_required
+def rtis_run_now():
+    run_now_file = os.path.join(BASE_DIR, 'data', 'rtis_run_now.txt')
+    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
+    fatal_file = os.path.join(BASE_DIR, 'data', 'rtis_fatal_error.txt')
+    if os.path.exists(stop_file): os.remove(stop_file)
+    if os.path.exists(fatal_file): os.remove(fatal_file)
+    with open(run_now_file, 'w') as f: f.write('run')
+    rtis_state['status'] = 'starting'
+    rtis_state['message'] = 'Manual RTIS run triggered — waking scraper...'
+    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return redirect(url_for('admin'))
+
+@app.route('/api/rtis/state', methods=['POST'])
+def update_rtis_state():
+    auth = request.headers.get('X-API-Secret', '')
+    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True)
+    rtis_state['status'] = payload.get('status', rtis_state['status'])
+    rtis_state['message'] = payload.get('message', rtis_state['message'])
+    if 'action_required' in payload:
+        rtis_state['action_required'] = payload['action_required']
+        rtis_state['action_type'] = payload.get('action_type', '')
+        rtis_state['image_base64'] = payload.get('image_base64', '')
+        rtis_state['phone_number'] = payload.get('phone_number')
+        rtis_state['submitted_value'] = None # reset
+    if 'active_tunnel' in payload:
+        rtis_state['active_tunnel'] = payload['active_tunnel']
+    if 'last_run' in payload:
+        rtis_state['last_run'] = payload['last_run']
+        
+    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    return jsonify({'success': True})
+
+@app.route('/api/rtis/action', methods=['GET'])
+def get_rtis_action():
+    auth = request.headers.get('X-API-Secret', '')
+    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
+    return jsonify({'submitted_value': rtis_state.get('submitted_value')})
+
+@app.route('/api/rtis/active_locos', methods=['GET'])
+def get_active_locos():
+    auth = request.headers.get('X-API-Secret', '')
+    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
+    
+    conn = get_db()
+    # Get active loco numbers from crew_records and crew_submissions
+    # Filter out empty or dash
+    locos = set()
+    rows1 = conn.execute("SELECT loco_no, crew_id FROM crew_records WHERE is_active = 1 AND loco_no != '' AND loco_no != '-'").fetchall()
+    rows2 = conn.execute("SELECT loco_no, crew_id FROM crew_submissions WHERE is_active = 1 AND loco_no != '' AND loco_no != '-'").fetchall()
+    
+    mapping = {}
+    for r in rows1 + rows2:
+        loco = r['loco_no']
+        # handle multiple locos separated by comma
+        for l in loco.split(','):
+            l = l.strip()
+            if l:
+                mapping[l] = r['crew_id']
+                locos.add(l)
+    conn.close()
+    return jsonify({'locos': list(locos), 'mapping': mapping})
+
+@app.route('/api/rtis/sync_loco', methods=['POST'])
+def sync_loco_location():
+    auth = request.headers.get('X-API-Secret', '')
+    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
+    
+    payload = request.get_json(force=True)
+    loco_no = payload.get('loco_no')
+    crew_id = payload.get('crew_id')
+    lat = payload.get('latitude')
+    lon = payload.get('longitude')
+    loc_name = payload.get('location_name')
+    moved = payload.get('moved_gt_100m', False)
+    
+    if not loco_no:
+        return jsonify({'error': 'loco_no required'}), 400
+        
+    conn = get_db()
+    now_str = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+    
+    # Check if exists
+    existing = conn.execute('SELECT latitude, longitude FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
+    
+    if existing:
+        conn.execute('''
+            UPDATE loco_locations 
+            SET crew_id = ?, prev_latitude = ?, prev_longitude = ?, 
+                latitude = ?, longitude = ?, location_name = ?, 
+                same_as_previous = ?, updated_at = ?
+            WHERE loco_no = ?
+        ''', (crew_id, existing['latitude'], existing['longitude'], lat, lon, loc_name, 0 if moved else 1, now_str, loco_no))
+    else:
+        conn.execute('''
+            INSERT INTO loco_locations (loco_no, crew_id, latitude, longitude, location_name, prev_latitude, prev_longitude, same_as_previous, updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, ?, ?)
+        ''', (loco_no, crew_id, lat, lon, loc_name, now_str, now_str))
+        
+    if moved and crew_id:
+        # Update departure time (departure_time) in crew_submissions
+        try:
+            conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", (now_str, crew_id))
+        except Exception as e:
+            print(f"Error updating departure_time: {e}")
+            
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
 
 @app.route('/crew_list')
 @login_required
@@ -1622,7 +1917,10 @@ def crew_list():
             loc_time_dt = None
 
         if loc_time_dt:
-            row['_loc_update_time'] = loc_time_dt.strftime('%d/%m/%y %H:%M')
+            row['_loc_time_dt'] = loc_time_dt
+            row['_loc_update_time'] = loc_time_dt.strftime('%H:%M')
+        else:
+            row['_loc_time_dt'] = None
 
         # Check for frozen_pdd from admin_edits FIRST
         frozen_pdd = crew_admin_edits.get('frozen_pdd')
@@ -1833,11 +2131,75 @@ def crew_list():
         row.pop('_sign_on_dt', None)
         row.pop('_cto_dt', None)
 
+    # --- Fetch RTIS Loco Locations ---
+    try:
+        conn = get_db()
+        loco_locs = conn.execute("SELECT loco_no, latitude, longitude, location_name, updated_at FROM loco_locations").fetchall()
+        rtis_locations = {}
+        for l in loco_locs:
+            rtis_locations[l['loco_no']] = {
+                'lat': l['latitude'],
+                'lon': l['longitude'],
+                'loc': l['location_name'],
+                'time': l['updated_at']
+            }
+        conn.close()
+    except Exception as e:
+        print(f"Error fetching loco locations: {e}")
+        rtis_locations = {}
+
+    # --- Dynamically override current_location with latest RTIS location for multi-locos ---
+    for row in data:
+        # Skip RTIS check entirely if crew has marked relief
+        if row.get('is_relief') == 1:
+            continue
+            
+        loco_no_str = row.get('loco_no')
+        if loco_no_str:
+            locos = [l.strip() for l in loco_no_str.split(',') if l.strip()]
+            latest_time = None
+            latest_loc = None
+            for loco in locos:
+                if loco in rtis_locations:
+                    loc_data = rtis_locations[loco]
+                    # Parse time string: %d/%m/%y %H:%M:%S IST
+                    time_str = loc_data['time'].replace(' IST', '')
+                    try:
+                        dt = datetime.strptime(time_str, '%d/%m/%y %H:%M:%S').replace(tzinfo=IST)
+                        if latest_time is None or dt > latest_time:
+                            latest_time = dt
+                            latest_loc = loc_data
+                    except Exception as e:
+                        print(f"Error parsing RTIS time {time_str}: {e}")
+            
+            if latest_loc:
+                loc_str = latest_loc.get('loc')
+                # Fallback to nearest station if loc is empty but lat/lon are present
+                if not loc_str and latest_loc.get('lat') and latest_loc.get('lon'):
+                    loc_str = get_nearest_station(float(latest_loc['lat']), float(latest_loc['lon']))
+                
+                if loc_str:
+                    # Expose latest loco data for the template so we don't show multiple locos
+                    row['_latest_rtis_loco'] = {
+                        'loc': loc_str,
+                        'time': latest_loc['time'],
+                        'lat': latest_loc.get('lat', ''),
+                        'lon': latest_loc.get('lon', '')
+                    }
+                    
+                    # Compare with manual location update time
+                    manual_time = row.get('_loc_time_dt')
+                    if not manual_time or (latest_time and latest_time >= manual_time):
+                        row['current_location'] = loc_str
+                        row['is_rtis_location'] = True
+                        row['_loc_update_time'] = latest_time.strftime('%H:%M') if latest_time else latest_loc['time']
+
     return render_template('crew_list.html', 
                            crew_list=data,
                            total_signon=total_signon,
                            total_10_hrs=total_10_hrs,
-                           total_12_hrs=total_12_hrs)
+                           total_12_hrs=total_12_hrs,
+                           rtis_locations=rtis_locations)
 
 @app.route('/api/save_ns_status', methods=['POST'])
 @login_required
