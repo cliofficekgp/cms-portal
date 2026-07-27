@@ -1623,6 +1623,7 @@ def get_active_locos():
     auth = request.headers.get('X-API-Secret', '')
     if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
     
+    conn = get_db()
     locos = set()
     mapping = {}
     
