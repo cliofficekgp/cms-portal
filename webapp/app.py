@@ -1717,11 +1717,13 @@ def sync_loco_location():
     now_str = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     
     # Check if exists
-    existing = conn.execute('SELECT latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
+    existing = conn.execute('SELECT crew_id, latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
     
     if existing:
         # Only update updated_at if location has physically changed (dist > 100m) or name changed
-        loc_changed = moved or (existing['location_name'] != loc_name)
+        # ALSO update if the crew_id changed (new crew took over the loco!)
+        crew_changed = (existing['crew_id'] != crew_id)
+        loc_changed = moved or (existing['location_name'] != loc_name) or crew_changed
         new_updated_at = now_str if loc_changed else existing['updated_at']
         
         conn.execute('''
