@@ -1981,18 +1981,7 @@ def _get_crew_list_data(conn):
         else:
             row['_loc_time_dt'] = None
 
-        # Check for frozen_pdd from admin_edits FIRST
-        frozen_pdd = crew_admin_edits.get('frozen_pdd')
-        if frozen_pdd:
-            row['pdd'] = frozen_pdd
-            # if frozen_pdd is set, we don't recalculate it dynamically below.
-            is_frozen = True
-        else:
-            row['pdd'] = '-'
-            is_frozen = False
-            
-        if not is_frozen:
-            # Calculate PDD dynamically based on current state
+        # Calculate PDD dynamically based on current state
             lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
             from_sttn = (row.get('from_sttn', '') or '').upper().strip()
             cto_sttn = (row.get('current_location', '') or '').upper().strip()
@@ -2003,11 +1992,13 @@ def _get_crew_list_data(conn):
 
             is_pdd_sttn = False
             if sign_on_dt:
-                if from_sttn in {'BHC', 'TATA'} and parse_dt(row.get('departure_time')):
+                # If they have departed from any tracked station, they have a PDD.
+                if parse_dt(row.get('departure_time')) and (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}):
                     is_pdd_sttn = True
+                # Otherwise, if they haven't departed yet, check if they are physically at the lobby
                 elif from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
                     is_pdd_sttn = True
-                elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
+                elif (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}) and from_sttn_norm == cto_sttn_norm:
                     is_pdd_sttn = True
 
             if is_pdd_sttn:
@@ -2018,6 +2009,8 @@ def _get_crew_list_data(conn):
                     p_hours = int(pdd_delta.total_seconds() // 3600)
                     p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
                     row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
+            else:
+                row['pdd'] = '-'
 
         # Auto-remove location based on departure time (deferred)
         if row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
@@ -2027,8 +2020,6 @@ def _get_crew_list_data(conn):
                     # Case A: Location hasn't been updated recently (or is blank).
                     _del_loc_admin.append(crew_id)
                     _null_loc_sub.append(crew_id)
-                    if row.get('pdd') and row['pdd'] != '-':
-                        _freeze_pdd.append((crew_id, row['pdd']))
                     row['current_location'] = ''
                     src['current_location'] = 'none'
                     row['_loc_update_time'] = dep_dt.strftime('%d/%m/%y %H:%M')
@@ -2050,8 +2041,6 @@ def _get_crew_list_data(conn):
                     if is_sign_on:
                         _del_loc_admin.append(crew_id)
                         _null_loc_sub.append(crew_id)
-                        if row.get('pdd') and row['pdd'] != '-':
-                            _freeze_pdd.append((crew_id, row['pdd']))
                         row['current_location'] = ''
                         src['current_location'] = 'none'
                         row['_loc_update_time'] = dep_dt.strftime('%d/%m/%y %H:%M')
@@ -2152,14 +2141,8 @@ def _get_crew_list_data(conn):
     try:
         updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
         with DB_WRITE_LOCK:
-            for cid, pdd_val in _freeze_pdd:
-                if pdd_val is not None:
-                    conn.execute('''
-                        INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                        VALUES (?, 'frozen_pdd', ?, ?)
-                        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                    ''', (cid, pdd_val, updated_at_freeze))
-                    
+            # We don't save frozen_pdd anymore, but we still need to save auto-freezed departure_time
+            # However, departure_time is saved inline when detected, so _freeze_pdd is no longer needed here.
             for cid, field in _del_admin_edits:
                 conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
             for cid in _del_submissions:
@@ -2273,9 +2256,6 @@ def _get_crew_list_data(conn):
                                     row['departure_time'] = new_dep
                                     _del_loc_admin.append(row['crew_id'])
                                     _null_loc_sub.append(row['crew_id'])
-                                    # Since departure_time is now set, PDD logic will freeze it naturally below
-                                    # We queue an admin edit so it persists to DB!
-                                    _freeze_pdd.append((row['crew_id'], None)) # Dummy value to signal we should save departure_time
                                     updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
                                     with DB_WRITE_LOCK:
                                         conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], new_dep, updated_at_freeze))
@@ -2311,82 +2291,6 @@ def save_ns_status():
     conn.close()
     return jsonify({'status': 'ok'})
 
-
-def compute_frozen_pdd(crew_id, conn):
-    r = conn.execute('''
-        SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time,
-               COALESCE(s.from_sttn, r.from_sttn) as from_sttn,
-               s.current_location as sub_loc,
-               s.submitted_at as sub_time,
-               COALESCE(s.departure_time, '') as departure_time
-        FROM crew_records r
-        LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id
-        WHERE r.crew_id = ?
-        ORDER BY s.id DESC LIMIT 1
-    ''', (crew_id,)).fetchone()
-    
-    if not r: return None
-    row = dict(r)
-    
-    admin_edits = conn.execute('SELECT field, value, updated_at FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
-    admin = {e['field']: e for e in admin_edits}
-    
-    sign_on_dt = parse_dt(row['sign_on_time']) if row.get('sign_on_time') else None
-    if not sign_on_dt: return None
-    
-    from_sttn = row.get('from_sttn', '').upper().strip()
-    
-    admin_loc_data = admin.get('current_location')
-    sub_loc = row.get('sub_loc')
-    sub_time = row.get('sub_time')
-    
-    curr_loc = ''
-    if admin_loc_data and sub_loc:
-        adt = parse_dt(admin_loc_data['updated_at'])
-        sdt = parse_dt(sub_time)
-        if adt and sdt and adt >= sdt:
-            curr_loc = admin_loc_data['value']
-        else:
-            curr_loc = sub_loc
-    elif admin_loc_data:
-        curr_loc = admin_loc_data['value']
-    elif sub_loc:
-        curr_loc = sub_loc
-        
-    curr_loc = curr_loc.upper().strip()
-    
-    dep_time = admin.get('departure_time', {}).get('value', row.get('departure_time', ''))
-    dep_dt = parse_dt(dep_time)
-    
-    lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
-    nmp_cluster = {'NMP', 'NPTY', 'NKKH', 'NMMS', 'NMPY', 'NPDY', 'NPRY'}
-    from_sttn_norm = 'NMP' if from_sttn in nmp_cluster else from_sttn
-    cto_sttn_norm = 'NMP' if curr_loc in nmp_cluster else curr_loc
-    
-    is_pdd_sttn = False
-    if from_sttn in {'BHC', 'TATA'} and dep_dt:
-        is_pdd_sttn = True
-    elif from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
-        is_pdd_sttn = True
-    elif from_sttn_norm in lobbies and from_sttn_norm == cto_sttn_norm:
-        is_pdd_sttn = True
-        
-    if is_pdd_sttn:
-        now = datetime.now(IST).replace(tzinfo=None)
-        if sign_on_dt.tzinfo:
-            sign_on_dt = sign_on_dt.replace(tzinfo=None)
-        if dep_dt and dep_dt.tzinfo:
-            dep_dt = dep_dt.replace(tzinfo=None)
-            
-        end_time = dep_dt if dep_dt else now
-        pdd_delta = end_time - sign_on_dt
-        if pdd_delta.total_seconds() > 0:
-            p_hours = int(pdd_delta.total_seconds() // 3600)
-            p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
-            return f"{p_hours:02d}:{p_minutes:02d}"
-            
-    return None
-
 @app.route('/api/admin_edit', methods=['POST'])
 @login_required
 def api_admin_edit():
@@ -2410,18 +2314,9 @@ def api_admin_edit():
 
     conn = get_db()
 
-    # If location is explicitly being removed, freeze the PDD calculation BEFORE saving
+    # If location is explicitly being removed, just let it be. PDD will dynamically track via departure_time.
     if field == 'current_location':
-        if value == '':
-            frozen = compute_frozen_pdd(crew_id, conn)
-            if frozen:
-                updated_at_pdd = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-                conn.execute('''
-                    INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                    VALUES (?, 'frozen_pdd', ?, ?)
-                    ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                ''', (crew_id, frozen, updated_at_pdd))
-        else:
+        if value != '':
             conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'frozen_pdd'", (crew_id,))
 
     if field in ('cto_time', 'departure_time', 'relief_datetime') and value and value not in ['-', '–']:
@@ -2491,15 +2386,6 @@ def api_admin_edit():
 
             new_dep_dt = parse_dt(value)
             if active_loc and new_dep_dt and loc_time_dt and new_dep_dt >= loc_time_dt:
-                # Freeze PDD using current location and new departure time (already saved above)
-                frozen = compute_frozen_pdd(crew_id, conn)
-                if frozen:
-                    conn.execute('''
-                        INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                        VALUES (?, 'frozen_pdd', ?, ?)
-                        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                    ''', (crew_id, frozen, updated_at))
-                    
                 # Clear the location
                 conn.execute('''
                     INSERT INTO admin_edits (crew_id, field, value, updated_at)
