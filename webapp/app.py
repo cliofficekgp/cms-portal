@@ -622,7 +622,7 @@ def super_admin_required(f):
 
 def parse_sign_on_dt(s):
     if not s or s == '-': return None
-    for fmt in ('%d-%m-%Y %H:%M', '%Y-%m-%d %H:%M'):
+    for fmt in ('%d-%m-%Y %H:%M', '%Y-%m-%d %H:%M', '%d/%m/%y %H:%M'):
         try:
             return datetime.strptime(s.strip(), fmt)
         except ValueError:
