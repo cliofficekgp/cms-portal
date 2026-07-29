@@ -1,483 +1,1175 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CMS – Crew List Monitor</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Inter', sans-serif; background: #0f172a; min-height: 100vh; color: #e2e8f0; font-size: 13px; }
-        .page-wrapper { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f172a;
+            min-height: 100vh;
+            color: #e2e8f0;
+            font-size: 13px;
+        }
+
+        .page-wrapper {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
 
         /* ── HEADER ── */
         .header {
             background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #2563eb 100%);
-            padding: 9px 16px; display: flex; align-items: center; justify-content: space-between;
-            gap: 10px; flex-shrink: 0;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: 9px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-shrink: 0;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .header-left { display: flex; flex-direction: column; gap: 1px; }
-        .header-title { font-size: 15px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 7px; }
-        .header-subtitle { font-size: 10px; color: #93c5fd; }
-        .header-center { display: flex; align-items: center; flex: 1; max-width: 320px; margin: 0 auto; }
-        .search-wrap { position: relative; width: 100%; }
-        .search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #93c5fd; pointer-events: none; }
+
+        .header-left {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .header-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .header-subtitle {
+            font-size: 10px;
+            color: #93c5fd;
+        }
+
+        .header-center {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            max-width: 320px;
+            margin: 0 auto;
+        }
+
+        .search-wrap {
+            position: relative;
+            width: 100%;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #93c5fd;
+            pointer-events: none;
+        }
+
         .search-input {
-            width: 100%; padding: 6px 8px 6px 28px;
-            background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 8px; color: #fff; font-size: 12px; font-family: inherit; outline: none;
+            width: 100%;
+            padding: 6px 8px 6px 28px;
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
         }
-        .search-input::placeholder { color: #93c5fd; }
-        .search-input:focus { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.4); }
-        .header-right { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
-        .save-status { font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 6px; transition: all 0.3s; }
-        .save-status.saving { background: #f59e0b; color: #1c1917; }
-        .save-status.saved  { background: #22c55e; color: #052e16; }
-        .save-status.hidden { display: none; }
-        .timer-badge { font-size: 10px; color: #bfdbfe; background: rgba(255,255,255,0.1); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+
+        .search-input::placeholder {
+            color: #93c5fd;
+        }
+
+        .search-input:focus {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            flex-shrink: 0;
+        }
+
+        .save-status {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 4px 9px;
+            border-radius: 6px;
+            transition: all 0.3s;
+        }
+
+        .save-status.saving {
+            background: #f59e0b;
+            color: #1c1917;
+        }
+
+        .save-status.saved {
+            background: #22c55e;
+            color: #052e16;
+        }
+
+        .save-status.hidden {
+            display: none;
+        }
+
+        .timer-badge {
+            font-size: 10px;
+            color: #bfdbfe;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 4px 7px;
+            border-radius: 6px;
+            white-space: nowrap;
+        }
+
         .btn-save-now {
-            font-size: 11px; font-weight: 600; padding: 5px 11px;
-            border-radius: 6px; background: rgba(34,197,94,0.25); color: #86efac;
-            border: 1px solid rgba(34,197,94,0.4); cursor: pointer; font-family: inherit;
-            transition: all 0.2s; white-space: nowrap;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 5px 11px;
+            border-radius: 6px;
+            background: rgba(34, 197, 94, 0.25);
+            color: #86efac;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+            white-space: nowrap;
         }
-        .btn-save-now:hover { background: rgba(34,197,94,0.45); color: #fff; }
-        .btn-nav { font-size: 11px; font-weight: 500; padding: 5px 9px; border-radius: 6px; color: #bfdbfe; text-decoration: none; transition: all 0.2s; }
-        .btn-nav:hover { background: rgba(255,255,255,0.15); color: #fff; }
-        .btn-logout { font-size: 11px; font-weight: 500; padding: 5px 9px; border-radius: 6px; background: rgba(239,68,68,0.35); color: #fca5a5; text-decoration: none; border: 1px solid rgba(239,68,68,0.4); transition: all 0.2s; }
-        .btn-logout:hover { background: rgba(239,68,68,0.55); color: #fff; }
+
+        .btn-save-now:hover {
+            background: rgba(34, 197, 94, 0.45);
+            color: #fff;
+        }
+
+        .btn-nav {
+            font-size: 11px;
+            font-weight: 500;
+            padding: 5px 9px;
+            border-radius: 6px;
+            color: #bfdbfe;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .btn-nav:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .btn-logout {
+            font-size: 11px;
+            font-weight: 500;
+            padding: 5px 9px;
+            border-radius: 6px;
+            background: rgba(239, 68, 68, 0.35);
+            color: #fca5a5;
+            text-decoration: none;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            transition: all 0.2s;
+        }
+
+        .btn-logout:hover {
+            background: rgba(239, 68, 68, 0.55);
+            color: #fff;
+        }
 
         /* ── CONTROLS BAR ── */
         .controls-bar {
-            background: #1e293b; padding: 5px 16px;
-            display: flex; align-items: center; justify-content: space-between;
-            border-bottom: 1px solid #334155; flex-shrink: 0; flex-wrap: wrap; gap: 6px;
+            background: #1e293b;
+            padding: 5px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #334155;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+            gap: 6px;
         }
-        .legend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #94a3b8; }
-        .legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
-        .dot-cms   { background: #3b82f6; }
-        .dot-sub   { background: #f59e0b; }
-        .dot-admin { background: #22c55e; }
-        .dot-red   { background: #ef4444; }
-        .dot-green { background: #22c55e; }
+
+        .legend {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: #94a3b8;
+        }
+
+        .legend-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        .dot-cms {
+            background: #3b82f6;
+        }
+
+        .dot-sub {
+            background: #f59e0b;
+        }
+
+        .dot-admin {
+            background: #22c55e;
+        }
+
+        .dot-red {
+            background: #ef4444;
+        }
+
+        .dot-green {
+            background: #22c55e;
+        }
+
         .btn-export {
-            font-size: 11px; font-weight: 500; padding: 4px 9px;
-            border-radius: 6px; background: #1e40af; color: #bfdbfe;
-            border: 1px solid #3b82f6; cursor: pointer;
-            display: flex; align-items: center; gap: 5px; transition: all 0.2s;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 4px 9px;
+            border-radius: 6px;
+            background: #1e40af;
+            color: #bfdbfe;
+            border: 1px solid #3b82f6;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s;
         }
-        .btn-export:hover { background: #2563eb; color: #fff; }
+
+        .btn-export:hover {
+            background: #2563eb;
+            color: #fff;
+        }
 
         /* ── LOBBY FILTER BAR ── */
         .lobby-bar {
-            background: #162032; padding: 5px 16px;
-            display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-            border-bottom: 1px solid #253350; flex-wrap: wrap;
+            background: #162032;
+            padding: 5px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #253350;
+            flex-wrap: wrap;
         }
-        .lobby-bar-label { font-size: 10px; font-weight: 700; color: #64748b; letter-spacing: 0.06em; white-space: nowrap; }
+
+        .lobby-bar-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: #64748b;
+            letter-spacing: 0.06em;
+            white-space: nowrap;
+        }
+
         .lobby-chip {
-            font-size: 11px; font-weight: 600; padding: 3px 10px;
-            border-radius: 20px; cursor: pointer; user-select: none;
-            border: 1.5px solid #334155; color: #94a3b8; background: transparent;
-            transition: all 0.18s; white-space: nowrap;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 20px;
+            cursor: pointer;
+            user-select: none;
+            border: 1.5px solid #334155;
+            color: #94a3b8;
+            background: transparent;
+            transition: all 0.18s;
+            white-space: nowrap;
         }
-        .lobby-chip:hover { border-color: #60a5fa; color: #e2e8f0; }
-        .lobby-chip.active { border-color: #3b82f6; background: rgba(59,130,246,0.18); color: #93c5fd; }
-        .lobby-chip-all.active { border-color: #22c55e; background: rgba(34,197,94,0.15); color: #86efac; }
-        .lobby-chip-kgp.active  { border-color: #818cf8; background: rgba(129,140,248,0.18); color: #c7d2fe; }
-        .lobby-chip-nmp.active  { border-color: #fb923c; background: rgba(251,146,60,0.18); color: #fed7aa; }
-        .lobby-chip-bls.active  { border-color: #2dd4bf; background: rgba(45,212,191,0.18); color: #99f6e4; }
-        .lobby-chip-gts.active  { border-color: #f472b6; background: rgba(244,114,182,0.18); color: #fbcfe8; }
-        .lobby-chip-adl.active  { border-color: #a3e635; background: rgba(163,230,53,0.18); color: #d9f99d; }
-        .lobby-chip-src.active  { border-color: #fbbf24; background: rgba(251,191,36,0.18); color: #fde68a; }
-        .lobby-chip-tpkr.active { border-color: #f87171; background: rgba(248,113,113,0.18); color: #fecaca; }
+
+        .lobby-chip:hover {
+            border-color: #60a5fa;
+            color: #e2e8f0;
+        }
+
+        .lobby-chip.active {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.18);
+            color: #93c5fd;
+        }
+
+        .lobby-chip-all.active {
+            border-color: #22c55e;
+            background: rgba(34, 197, 94, 0.15);
+            color: #86efac;
+        }
+
+        .lobby-chip-kgp.active {
+            border-color: #818cf8;
+            background: rgba(129, 140, 248, 0.18);
+            color: #c7d2fe;
+        }
+
+        .lobby-chip-nmp.active {
+            border-color: #fb923c;
+            background: rgba(251, 146, 60, 0.18);
+            color: #fed7aa;
+        }
+
+        .lobby-chip-bls.active {
+            border-color: #2dd4bf;
+            background: rgba(45, 212, 191, 0.18);
+            color: #99f6e4;
+        }
+
+        .lobby-chip-gts.active {
+            border-color: #f472b6;
+            background: rgba(244, 114, 182, 0.18);
+            color: #fbcfe8;
+        }
+
+        .lobby-chip-adl.active {
+            border-color: #a3e635;
+            background: rgba(163, 230, 53, 0.18);
+            color: #d9f99d;
+        }
+
+        .lobby-chip-src.active {
+            border-color: #fbbf24;
+            background: rgba(251, 191, 36, 0.18);
+            color: #fde68a;
+        }
+
+        .lobby-chip-tpkr.active {
+            border-color: #f87171;
+            background: rgba(248, 113, 113, 0.18);
+            color: #fecaca;
+        }
 
         /* ── TABLE ── */
-        .table-wrap { overflow: auto; flex: 1; }
-        table { width: 100%; border-collapse: collapse; }
-        thead { position: sticky; top: 0; z-index: 20; }
-        thead tr { background: #1e293b; }
-        th {
-            padding: 6px 5px; font-size: 10px; font-weight: 600;
-            text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8;
-            white-space: nowrap; border-bottom: 2px solid #334155;
-            user-select: none; cursor: pointer;
+        .table-wrap {
+            overflow: auto;
+            flex: 1;
         }
-        th:hover { color: #e2e8f0; background: #263347; }
-        th.sorted-asc::after  { content: ' ▲'; font-size: 8px; color: #60a5fa; }
-        th.sorted-desc::after { content: ' ▼'; font-size: 8px; color: #60a5fa; }
 
-        tbody tr { border-bottom: 1px solid #475569; transition: background 0.15s; }
-        tbody tr:hover { background: rgba(30,58,138,0.25) !important; }
-        tbody tr.row-ns     { background: rgba(99,102,241,0.22) !important; font-weight: 600; }
-        tbody tr.row-miss   { background: rgba(239,68,68,0.13) !important; }
-        tbody tr.row-relief { background: rgba(245,158,11,0.10) !important; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
 
-        td { padding: 4px 5px; color: #cbd5e1; white-space: nowrap; vertical-align: middle; }
-        td.crew-id-cell { font-weight: 700; color: #e2e8f0; }
-        td.name-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-        .td-center { text-align: center; }
+        thead {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+
+        thead tr {
+            background: #1e293b;
+        }
+
+        th {
+            padding: 6px 5px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            white-space: nowrap;
+            border-bottom: 2px solid #334155;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        th:hover {
+            color: #e2e8f0;
+            background: #263347;
+        }
+
+        th.sorted-asc::after {
+            content: ' ▲';
+            font-size: 8px;
+            color: #60a5fa;
+        }
+
+        th.sorted-desc::after {
+            content: ' ▼';
+            font-size: 8px;
+            color: #60a5fa;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #475569;
+            transition: background 0.15s;
+        }
+
+        tbody tr:hover {
+            background: rgba(30, 58, 138, 0.25) !important;
+        }
+
+        tbody tr.row-ns {
+            background: rgba(99, 102, 241, 0.22) !important;
+            font-weight: 600;
+        }
+
+        tbody tr.row-miss {
+            background: rgba(239, 68, 68, 0.13) !important;
+        }
+
+        tbody tr.row-relief {
+            background: rgba(245, 158, 11, 0.10) !important;
+        }
+
+        td {
+            padding: 4px 5px;
+            color: #cbd5e1;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+
+        td.crew-id-cell {
+            font-weight: 700;
+            color: #e2e8f0;
+        }
+
+        td.name-cell {
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .td-center {
+            text-align: center;
+        }
 
         /* ── DUTY HOURS ── */
         .duty-cell {
-            font-weight: 700; border-radius: 4px; padding: 2px 6px;
-            text-align: center; font-size: 12px; min-width: 52px; display: inline-block;
+            font-weight: 700;
+            border-radius: 4px;
+            padding: 2px 6px;
+            text-align: center;
+            font-size: 12px;
+            min-width: 52px;
+            display: inline-block;
         }
-        .dh-critical { background: #7f1d1d; color: #fca5a5; }
-        .dh-high     { background: #92400e; color: #fcd34d; }
-        .dh-mid      { background: #713f12; color: #fde68a; }
-        .dh-low      { background: #14532d; color: #86efac; }
-        .dh-ok       { background: #052e16; color: #4ade80; }
+
+        .dh-critical {
+            background: #7f1d1d;
+            color: #fca5a5;
+        }
+
+        .dh-high {
+            background: #92400e;
+            color: #fcd34d;
+        }
+
+        .dh-mid {
+            background: #713f12;
+            color: #fde68a;
+        }
+
+        .dh-low {
+            background: #14532d;
+            color: #86efac;
+        }
+
+        .dh-ok {
+            background: #052e16;
+            color: #4ade80;
+        }
 
         /* ── DEPARTURE TIME SOURCE HIGHLIGHT ── */
         /* Crew self-submission */
-        input.dept-sub  { color: #fbbf24 !important; font-weight: 700; background: rgba(251,191,36,0.08) !important; border-radius: 4px; }
+        input.dept-sub {
+            color: #fbbf24 !important;
+            font-weight: 700;
+            background: rgba(251, 191, 36, 0.08) !important;
+            border-radius: 4px;
+        }
+
         /* Admin manual entry */
-        input.dept-admin { color: #4ade80 !important; font-weight: 700; background: rgba(74,222,128,0.08) !important; border-radius: 4px; }
+        input.dept-admin {
+            color: #4ade80 !important;
+            font-weight: 700;
+            background: rgba(74, 222, 128, 0.08) !important;
+            border-radius: 4px;
+        }
+
         /* RTIS auto-frozen */
-        input.dept-rtis  { color: #60a5fa !important; font-weight: 700; background: rgba(96,165,250,0.10) !important; border-radius: 4px; }
+        input.dept-rtis {
+            color: #60a5fa !important;
+            font-weight: 700;
+            background: rgba(96, 165, 250, 0.10) !important;
+            border-radius: 4px;
+        }
 
         /* ── SOURCE COLORS ── */
-        .src-cms   { border-left: 3px solid #3b82f6 !important; }
-        .src-sub   { border-left: 3px solid #f59e0b !important; }
-        .src-admin { border-left: 3px solid #22c55e !important; background: rgba(34,197,94,0.07) !important; }
+        .src-cms {
+            border-left: 3px solid #3b82f6 !important;
+        }
+
+        .src-sub {
+            border-left: 3px solid #f59e0b !important;
+        }
+
+        .src-admin {
+            border-left: 3px solid #22c55e !important;
+            background: rgba(34, 197, 94, 0.07) !important;
+        }
 
         /* ── EDITABLE CELLS (loco / train / bpc) ── */
         .editable {
-            min-width: 56px; outline: none; border-radius: 4px; padding: 2px 4px;
-            cursor: text; transition: background 0.15s, box-shadow 0.15s;
-            display: inline-block; text-align: center;
+            min-width: 56px;
+            outline: none;
+            border-radius: 4px;
+            padding: 2px 4px;
+            cursor: text;
+            transition: background 0.15s, box-shadow 0.15s;
+            display: inline-block;
+            text-align: center;
         }
-        .editable:hover { background: rgba(99,102,241,0.15); box-shadow: 0 0 0 1px #4f46e5; }
-        .editable:focus { background: rgba(99,102,241,0.25); box-shadow: 0 0 0 2px #6366f1; color: #fff; }
-        .editable.field-dirty { box-shadow: 0 0 0 1px #f59e0b !important; }
+
+        .editable:hover {
+            background: rgba(99, 102, 241, 0.15);
+            box-shadow: 0 0 0 1px #4f46e5;
+        }
+
+        .editable:focus {
+            background: rgba(99, 102, 241, 0.25);
+            box-shadow: 0 0 0 2px #6366f1;
+            color: #fff;
+        }
+
+        .editable.field-dirty {
+            box-shadow: 0 0 0 1px #f59e0b !important;
+        }
 
         /* ── STATION AUTOCOMPLETE ── */
-        .ac-wrap { position: relative; display: inline-block; min-width: 72px; }
+        .ac-wrap {
+            position: relative;
+            display: inline-block;
+            min-width: 72px;
+        }
+
         .ac-input {
-            width: 100%; padding: 2px 5px; background: transparent;
-            border: 1px solid transparent; border-radius: 4px;
-            color: #e2e8f0; font-size: 12px; font-family: inherit;
-            outline: none; transition: all 0.15s; text-align: center; text-transform: uppercase;
+            width: 100%;
+            padding: 2px 5px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.15s;
+            text-align: center;
+            text-transform: uppercase;
         }
-        .ac-input:hover { background: rgba(99,102,241,0.15); border-color: #4f46e5; }
-        .ac-input:focus { background: rgba(99,102,241,0.25); border-color: #6366f1; color: #fff; }
-        .ac-input.field-dirty { border-color: #f59e0b !important; }
+
+        .ac-input:hover {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: #4f46e5;
+        }
+
+        .ac-input:focus {
+            background: rgba(99, 102, 241, 0.25);
+            border-color: #6366f1;
+            color: #fff;
+        }
+
+        .ac-input.field-dirty {
+            border-color: #f59e0b !important;
+        }
+
         .ac-dropdown {
-            position: absolute; left: 0; top: calc(100% + 2px); z-index: 200;
-            background: #1e293b; border: 1px solid #334155; border-radius: 8px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-height: 200px;
-            overflow-y: auto; min-width: 200px; display: none;
+            position: absolute;
+            left: 0;
+            top: calc(100% + 2px);
+            z-index: 200;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            max-height: 200px;
+            overflow-y: auto;
+            min-width: 200px;
+            display: none;
         }
+
         .ac-item {
-            padding: 6px 10px; font-size: 11px; color: #cbd5e1; cursor: pointer;
-            display: flex; gap: 8px; align-items: center;
+            padding: 6px 10px;
+            font-size: 11px;
+            color: #cbd5e1;
+            cursor: pointer;
+            display: flex;
+            gap: 8px;
+            align-items: center;
         }
-        .ac-item:hover { background: rgba(99,102,241,0.25); color: #fff; }
-        .ac-code { font-weight: 700; color: #60a5fa; min-width: 36px; }
-        .ac-name { color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .ac-item:hover {
+            background: rgba(99, 102, 241, 0.25);
+            color: #fff;
+        }
+
+        .ac-code {
+            font-weight: 700;
+            color: #60a5fa;
+            min-width: 36px;
+        }
+
+        .ac-name {
+            color: #94a3b8;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
 
         /* ── DATETIME INPUT ── */
         .dt-input {
-            background: transparent; border: 1px solid transparent; border-radius: 4px;
-            color: #e2e8f0; font-size: 11px; font-family: inherit;
-            outline: none; padding: 2px 4px; cursor: pointer; width: 100%;
-            transition: all 0.15s; text-align: center;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-size: 11px;
+            font-family: inherit;
+            outline: none;
+            padding: 2px 4px;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.15s;
+            text-align: center;
             color-scheme: dark;
         }
-        .dt-input:hover { background: rgba(99,102,241,0.15); border-color: #4f46e5; }
-        .dt-input:focus { background: rgba(99,102,241,0.25); border-color: #6366f1; }
-        .dt-input.field-dirty { border-color: #f59e0b !important; }
+
+        .dt-input:hover {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: #4f46e5;
+        }
+
+        .dt-input:focus {
+            background: rgba(99, 102, 241, 0.25);
+            border-color: #6366f1;
+        }
+
+        .dt-input.field-dirty {
+            border-color: #f59e0b !important;
+        }
 
         /* ── RELIEF CELL ── */
-        .relief-wrap { display: flex; flex-direction: column; gap: 3px; align-items: center; min-width: 150px; }
-        .relief-check-row { display: flex; align-items: center; gap: 5px; }
-        .relief-toggle { width: 14px; height: 14px; cursor: pointer; accent-color: #f59e0b; }
-        .relief-toggle-label { font-size: 10px; color: #94a3b8; }
-        .relief-fields { display: flex; flex-direction: column; gap: 3px; width: 100%; }
-        .relief-fields.hidden-fields { display: none; }
-        .relief-stn-wrap { position: relative; }
-        .relief-stn-input {
-            width: 100%; padding: 2px 5px; background: rgba(255,255,255,0.05);
-            border: 1px solid #334155; border-radius: 4px;
-            color: #e2e8f0; font-size: 11px; font-family: inherit; outline: none;
-            text-transform: uppercase; text-align: center;
+        .relief-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            align-items: center;
+            min-width: 150px;
         }
-        .relief-stn-input:focus { border-color: #f59e0b; background: rgba(245,158,11,0.08); }
+
+        .relief-check-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .relief-toggle {
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+            accent-color: #f59e0b;
+        }
+
+        .relief-toggle-label {
+            font-size: 10px;
+            color: #94a3b8;
+        }
+
+        .relief-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            width: 100%;
+        }
+
+        .relief-fields.hidden-fields {
+            display: none;
+        }
+
+        .relief-stn-wrap {
+            position: relative;
+        }
+
+        .relief-stn-input {
+            width: 100%;
+            padding: 2px 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid #334155;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-size: 11px;
+            font-family: inherit;
+            outline: none;
+            text-transform: uppercase;
+            text-align: center;
+        }
+
+        .relief-stn-input:focus {
+            border-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.08);
+        }
+
         .relief-dt-input {
-            width: 100%; background: rgba(255,255,255,0.05); border: 1px solid #334155;
-            border-radius: 4px; color: #e2e8f0; font-size: 11px; font-family: inherit;
-            outline: none; padding: 2px 4px; cursor: pointer; text-align: center;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid #334155;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-size: 11px;
+            font-family: inherit;
+            outline: none;
+            padding: 2px 4px;
+            cursor: pointer;
+            text-align: center;
             color-scheme: dark;
         }
-        .relief-dt-input:focus { border-color: #f59e0b; background: rgba(245,158,11,0.08); }
+
+        .relief-dt-input:focus {
+            border-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.08);
+        }
+
         .relief-ac-dropdown {
-            position: absolute; left: 0; top: calc(100% + 2px); z-index: 200;
-            background: #1e293b; border: 1px solid #334155; border-radius: 8px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-height: 160px;
-            overflow-y: auto; min-width: 180px; display: none;
+            position: absolute;
+            left: 0;
+            top: calc(100% + 2px);
+            z-index: 200;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            max-height: 160px;
+            overflow-y: auto;
+            min-width: 180px;
+            display: none;
         }
 
         /* ── PHONE CELL ── */
-        .phone-wrap { display: flex; align-items: flex-start; gap: 4px; }
-        .phone-numbers { flex: 1; font-size: 11px; line-height: 1.5; }
-        .phone-num-line { display: block; }
-        .btn-add-phone {
-            width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
-            background: #1e40af; border: 1px solid #3b82f6;
-            color: #93c5fd; font-size: 14px; font-weight: 700;
-            cursor: pointer; display: flex; align-items: center; justify-content: center;
-            transition: all 0.2s; line-height: 1; margin-top: 1px;
+        .phone-wrap {
+            display: flex;
+            align-items: flex-start;
+            gap: 4px;
         }
-        .btn-add-phone:hover { background: #2563eb; color: #fff; }
+
+        .phone-numbers {
+            flex: 1;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .phone-num-line {
+            display: block;
+        }
+
+        .btn-add-phone {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: #1e40af;
+            border: 1px solid #3b82f6;
+            color: #93c5fd;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            line-height: 1;
+            margin-top: 1px;
+        }
+
+        .btn-add-phone:hover {
+            background: #2563eb;
+            color: #fff;
+        }
 
         /* ── PHONE POPOVER ── */
         .phone-popover {
-            position: fixed; z-index: 1000; background: #1e293b;
-            border: 1px solid #334155; border-radius: 10px; padding: 14px;
-            min-width: 240px; box-shadow: 0 20px 60px rgba(0,0,0,0.7); display: none;
+            position: fixed;
+            z-index: 1000;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 14px;
+            min-width: 240px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+            display: none;
         }
-        .phone-popover.visible { display: block; }
-        .popover-title { font-size: 12px; font-weight: 600; color: #e2e8f0; margin-bottom: 8px; }
-        .popover-input {
-            width: 100%; padding: 7px 10px; background: #0f172a;
-            border: 1px solid #475569; border-radius: 6px;
-            color: #e2e8f0; font-size: 12px; font-family: inherit; outline: none;
-        }
-        .popover-input:focus { border-color: #3b82f6; }
-        .popover-actions { display: flex; gap: 6px; margin-top: 8px; }
-        .btn-pop-save { flex: 1; padding: 6px; background: #1d4ed8; color: #fff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.2s; }
-        .btn-pop-save:hover { background: #2563eb; }
-        .btn-pop-cancel { padding: 6px 10px; background: #334155; color: #94a3b8; border: none; border-radius: 6px; font-size: 11px; cursor: pointer; font-family: inherit; transition: background 0.2s; }
-        .btn-pop-cancel:hover { background: #475569; }
 
-        .ns-checkbox { accent-color: #6366f1; width: 14px; height: 14px; cursor: pointer; }
-        .empty-row td { text-align: center; color: #475569; padding: 40px; font-size: 13px; }
-        .toast {
-            position: fixed; bottom: 20px; right: 20px; z-index: 9999;
-            background: #1e293b; border: 1px solid #334155; border-radius: 10px;
-            padding: 10px 16px; font-size: 12px; color: #e2e8f0;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            transform: translateY(80px); opacity: 0; transition: all 0.3s ease;
+        .phone-popover.visible {
+            display: block;
         }
-        .toast.show { transform: translateY(0); opacity: 1; }
-        .toast.success { border-left: 4px solid #22c55e; }
-        .toast.error   { border-left: 4px solid #ef4444; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        .popover-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #e2e8f0;
+            margin-bottom: 8px;
+        }
+
+        .popover-input {
+            width: 100%;
+            padding: 7px 10px;
+            background: #0f172a;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .popover-input:focus {
+            border-color: #3b82f6;
+        }
+
+        .popover-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .btn-pop-save {
+            flex: 1;
+            padding: 6px;
+            background: #1d4ed8;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.2s;
+        }
+
+        .btn-pop-save:hover {
+            background: #2563eb;
+        }
+
+        .btn-pop-cancel {
+            padding: 6px 10px;
+            background: #334155;
+            color: #94a3b8;
+            border: none;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.2s;
+        }
+
+        .btn-pop-cancel:hover {
+            background: #475569;
+        }
+
+        .ns-checkbox {
+            accent-color: #6366f1;
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+
+        .empty-row td {
+            text-align: center;
+            color: #475569;
+            padding: 40px;
+            font-size: 13px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 10px 16px;
+            font-size: 12px;
+            color: #e2e8f0;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            transform: translateY(80px);
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-left: 4px solid #22c55e;
+        }
+
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
     </style>
 </head>
+
 <body>
-<div class="page-wrapper">
+    <div class="page-wrapper">
 
-    <!-- HEADER -->
-    <div class="header">
-        <div class="header-left">
-            <div class="header-title">
-                <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
-                </svg>
-                Crew List Monitor
+        <!-- HEADER -->
+        <div class="header">
+            <div class="header-left">
+                <div class="header-title">
+                    <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                    Crew List Monitor
+                </div>
+                <div class="header-subtitle">Live duty hours · Auto-save every 5 min</div>
             </div>
-            <div class="header-subtitle">Live duty hours · Auto-save every 5 min</div>
-        </div>
-        <div class="header-center">
-            <div class="search-wrap">
-                <svg class="search-icon" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
-                </svg>
-                <input type="text" id="searchInput" class="search-input" placeholder="Search crew…">
+            <div class="header-center">
+                <div class="search-wrap">
+                    <svg class="search-icon" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    <input type="text" id="searchInput" class="search-input" placeholder="Search crew…">
+                </div>
+            </div>
+            <div class="header-right">
+                <span id="saveStatus" class="save-status hidden">Saving…</span>
+                <span class="timer-badge" id="timerBadge">Save in 5:00</span>
+                <button class="btn-save-now" onclick="saveAndRefresh(true)">💾 Save Now</button>
+                <a href="/admin" class="btn-nav">Admin</a>
+                <a href="/admin/logout" class="btn-logout">Logout</a>
             </div>
         </div>
-        <div class="header-right">
-            <span id="saveStatus" class="save-status hidden">Saving…</span>
-            <span class="timer-badge" id="timerBadge">Save in 5:00</span>
-            <button class="btn-save-now" onclick="saveAndRefresh(true)">💾 Save Now</button>
-            <a href="/admin" class="btn-nav">Admin</a>
-            <a href="/admin/logout" class="btn-logout">Logout</a>
+
+        <!-- CONTROLS BAR -->
+        <div class="controls-bar">
+            <div class="legend">
+                <span style="font-size:10px;font-weight:600;color:#64748b;margin-right:2px;">DATA SOURCE:</span>
+                <span class="legend-item"><span class="legend-dot dot-cms"></span> CMS Record</span>
+                <span class="legend-item"><span class="legend-dot dot-sub"></span> Crew Submission</span>
+                <span class="legend-item"><span class="legend-dot dot-admin"></span> Admin Edit</span>
+                <span style="margin-left:8px;border-left:1px solid #334155;padding-left:8px;" class="legend-item">
+                    <span class="legend-dot dot-red"></span> High Duty
+                </span>
+                <span class="legend-item"><span class="legend-dot dot-green"></span> Low Duty</span>
+
+                <span
+                    style="margin-left:16px;border-left:1px solid #334155;padding-left:16px;display:flex;gap:12px;align-items:center;">
+                    <span style="font-size:11px;font-weight:600;color:#93c5fd;letter-spacing:0.02em;">TOTAL ACTIVE:
+                        <span style="color:#fff;font-size:12px;">{{ total_signon }}</span></span>
+                    <span style="font-size:11px;font-weight:600;color:#fca5a5;letter-spacing:0.02em;">>10 HRS: <span
+                            style="color:#fff;font-size:12px;">{{ total_10_hrs }}</span></span>
+                    <span style="font-size:11px;font-weight:600;color:#ef4444;letter-spacing:0.02em;">>12 HRS: <span
+                            style="color:#fff;font-size:12px;">{{ total_12_hrs }}</span></span>
+                </span>
+            </div>
+            <button onclick="exportTableToCSV('crew_list.csv')" class="btn-export">
+                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export
+            </button>
         </div>
-    </div>
 
-    <!-- CONTROLS BAR -->
-    <div class="controls-bar">
-        <div class="legend">
-            <span style="font-size:10px;font-weight:600;color:#64748b;margin-right:2px;">DATA SOURCE:</span>
-            <span class="legend-item"><span class="legend-dot dot-cms"></span> CMS Record</span>
-            <span class="legend-item"><span class="legend-dot dot-sub"></span> Crew Submission</span>
-            <span class="legend-item"><span class="legend-dot dot-admin"></span> Admin Edit</span>
-            <span style="margin-left:8px;border-left:1px solid #334155;padding-left:8px;" class="legend-item">
-                <span class="legend-dot dot-red"></span> High Duty
-            </span>
-            <span class="legend-item"><span class="legend-dot dot-green"></span> Low Duty</span>
-            
-            <span style="margin-left:16px;border-left:1px solid #334155;padding-left:16px;display:flex;gap:12px;align-items:center;">
-                <span style="font-size:11px;font-weight:600;color:#93c5fd;letter-spacing:0.02em;">TOTAL ACTIVE: <span style="color:#fff;font-size:12px;">{{ total_signon }}</span></span>
-                <span style="font-size:11px;font-weight:600;color:#fca5a5;letter-spacing:0.02em;">>10 HRS: <span style="color:#fff;font-size:12px;">{{ total_10_hrs }}</span></span>
-                <span style="font-size:11px;font-weight:600;color:#ef4444;letter-spacing:0.02em;">>12 HRS: <span style="color:#fff;font-size:12px;">{{ total_12_hrs }}</span></span>
-            </span>
+        <!-- LOBBY FILTER BAR -->
+        <div class="lobby-bar" id="lobbyBar">
+            <span class="lobby-bar-label">LOBBY:</span>
+            <button class="lobby-chip lobby-chip-all active" data-lobby="ALL" id="chip-ALL">All</button>
+            <button class="lobby-chip lobby-chip-kgp" data-lobby="KGP" id="chip-KGP">KGP</button>
+            <button class="lobby-chip lobby-chip-nmp" data-lobby="NMP" id="chip-NMP">NMP</button>
+            <button class="lobby-chip lobby-chip-bls" data-lobby="BLS" id="chip-BLS">BLS</button>
+            <button class="lobby-chip lobby-chip-gts" data-lobby="GTS" id="chip-GTS">GTS</button>
+            <button class="lobby-chip lobby-chip-adl" data-lobby="ADL" id="chip-ADL">ADL</button>
+            <button class="lobby-chip lobby-chip-src" data-lobby="SRC" id="chip-SRC">SRC</button>
+            <button class="lobby-chip lobby-chip-tpkr" data-lobby="TPKR" id="chip-TPKR">TPKR</button>
         </div>
-        <button onclick="exportTableToCSV('crew_list.csv')" class="btn-export">
-            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            Export
-        </button>
-    </div>
 
-    <!-- LOBBY FILTER BAR -->
-    <div class="lobby-bar" id="lobbyBar">
-        <span class="lobby-bar-label">LOBBY:</span>
-        <button class="lobby-chip lobby-chip-all active" data-lobby="ALL" id="chip-ALL">All</button>
-        <button class="lobby-chip lobby-chip-kgp"  data-lobby="KGP"  id="chip-KGP">KGP</button>
-        <button class="lobby-chip lobby-chip-nmp"  data-lobby="NMP"  id="chip-NMP">NMP</button>
-        <button class="lobby-chip lobby-chip-bls"  data-lobby="BLS"  id="chip-BLS">BLS</button>
-        <button class="lobby-chip lobby-chip-gts"  data-lobby="GTS"  id="chip-GTS">GTS</button>
-        <button class="lobby-chip lobby-chip-adl"  data-lobby="ADL"  id="chip-ADL">ADL</button>
-        <button class="lobby-chip lobby-chip-src"  data-lobby="SRC"  id="chip-SRC">SRC</button>
-        <button class="lobby-chip lobby-chip-tpkr" data-lobby="TPKR" id="chip-TPKR">TPKR</button>
-    </div>
+        <!-- TABLE -->
+        <div class="table-wrap">
+            <table id="crewTable">
+                <thead>
+                    <tr>
+                        <th data-col="0">Crew ID</th>
+                        <th data-col="1">Name</th>
+                        <th data-col="2">Ord Time</th>
+                        <th data-col="3">Sign On</th>
+                        <th data-col="4" style="text-align:center">CTO Time</th>
+                        <th data-col="5" style="text-align:center">Dept Time</th>
 
-    <!-- TABLE -->
-    <div class="table-wrap">
-        <table id="crewTable">
-            <thead>
-                <tr>
-                    <th data-col="0">Crew ID</th>
-                    <th data-col="1">Name</th>
-                    <th data-col="2">Ord Time</th>
-                    <th data-col="3">Sign On</th>
-                    <th data-col="4" style="text-align:center">CTO Time</th>
-                    <th data-col="5" style="text-align:center">
-                        Dept Time
-                        <div style="display:flex;justify-content:center;gap:6px;margin-top:3px;font-size:9px;font-weight:400;line-height:1;">
-                            <span style="color:#fbbf24" title="Crew submitted">● Crew</span>
-                            <span style="color:#4ade80" title="Admin entry">● Admin</span>
-                            <span style="color:#60a5fa" title="RTIS auto-frozen">● RTIS</span>
-                        </div>
-                    </th>
+                        <th data-col="6">PDD</th>
+                        <th data-col="7">Duty Hrs</th>
+                        <th data-col="8">From</th>
+                        <th data-col="9">To</th>
+                        <th data-col="10" style="text-align:center">Loco No</th>
+                        <th data-col="11">Train No</th>
+                        <th data-col="12" style="text-align:center">BPC No</th>
+                        <th data-col="13" style="text-align:center">Location</th>
+                        <th data-col="14" style="text-align:center">Relief</th>
+                        <th data-col="15">Mobile No</th>
+                        <th data-col="16">Found NS?</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    {% for crew in crew_list %}
+                    {% set src = crew._src %}
+                    {# Derive lobby prefix from crew_id for client-side filtering #}
+                    {%- set lobby_prefix = crew.crew_id[:4] if crew.crew_id|length >= 4 and crew.crew_id[:4] == 'TPKR'
+                    else crew.crew_id[:3] -%}
+                    {% set base_class = 'row-miss' if crew.ingest_miss_count >= 3 else ('row-relief' if crew.is_relief
+                    == 1 else '') %}
+                    <tr class="{{ 'row-ns' if crew.found_in_ns == 'yes' else base_class }}"
+                        data-crew="{{ crew.crew_id }}" data-lobby="{{ lobby_prefix }}">
 
-                    <th data-col="6">PDD</th>
-                    <th data-col="7">Duty Hrs</th>
-                    <th data-col="8">From</th>
-                    <th data-col="9">To</th>
-                    <th data-col="10" style="text-align:center">Loco No</th>
-                    <th data-col="11">Train No</th>
-                    <th data-col="12" style="text-align:center">BPC No</th>
-                    <th data-col="13" style="text-align:center">Location</th>
-                    <th data-col="14" style="text-align:center">Relief</th>
-                    <th data-col="15">Mobile No</th>
-                    <th data-col="16">Found NS?</th>
-                </tr>
-            </thead>
-            <tbody id="tableBody">
-                {% for crew in crew_list %}
-                {% set src = crew._src %}
-                {# Derive lobby prefix from crew_id for client-side filtering #}
-                {%- set lobby_prefix = crew.crew_id[:4] if crew.crew_id|length >= 4 and crew.crew_id[:4] == 'TPKR' else crew.crew_id[:3] -%}
-                {% set base_class = 'row-miss' if crew.ingest_miss_count >= 3 else ('row-relief' if crew.is_relief == 1 else '') %}
-                <tr class="{{ 'row-ns' if crew.found_in_ns == 'yes' else base_class }}"
-                    data-crew="{{ crew.crew_id }}"
-                    data-lobby="{{ lobby_prefix }}">
+                        <!-- Crew ID -->
+                        <td class="crew-id-cell">{{ crew.crew_id }}</td>
 
-                    <!-- Crew ID -->
-                    <td class="crew-id-cell">{{ crew.crew_id }}</td>
+                        <!-- Name -->
+                        <td class="name-cell" title="{{ crew.name }}">{{ crew.name }}</td>
 
-                    <!-- Name -->
-                    <td class="name-cell" title="{{ crew.name }}">{{ crew.name }}</td>
+                        <!-- Ord Time -->
+                        <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '–' }}</td>
 
-                    <!-- Ord Time -->
-                    <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '–' }}</td>
+                        <!-- Sign On -->
+                        <td style="white-space:nowrap">{{ crew.sign_on_time }}</td>
 
-                    <!-- Sign On -->
-                    <td style="white-space:nowrap">{{ crew.sign_on_time }}</td>
+                        <!-- CTO Time (time picker, center) -->
+                        <td class="src-{{ src.cto_time }} td-center">
+                            <input type="time" class="dt-input" data-field="cto_time" data-crew="{{ crew.crew_id }}"
+                                data-raw="{{ crew.cto_time if crew.cto_time else '' }}"
+                                title="{{ crew.cto_time if crew.cto_time else 'Not set' }}">
+                        </td>
 
-                    <!-- CTO Time (time picker, center) -->
-                    <td class="src-{{ src.cto_time }} td-center">
-                        <input type="time" class="dt-input"
-                               data-field="cto_time" data-crew="{{ crew.crew_id }}"
-                               data-raw="{{ crew.cto_time if crew.cto_time else '' }}"
-                               title="{{ crew.cto_time if crew.cto_time else 'Not set' }}">
-                    </td>
+                        <!-- Dept Time (editable time, center) -->
+                        <td class="src-{{ src.departure_time }} td-center">
+                            <input type="time"
+                                class="dt-input {% if crew.is_rtis_departure %}dept-rtis{% elif src.departure_time == 'admin' %}dept-admin{% elif src.departure_time == 'sub' %}dept-sub{% endif %}"
+                                data-field="departure_time" data-crew="{{ crew.crew_id }}"
+                                data-raw="{{ crew.departure_time if crew.departure_time else '' }}"
+                                title="Dept: {{ crew.departure_time if crew.departure_time else 'Not set' }}{% if crew.is_rtis_departure %} — RTIS auto-frozen{% elif src.departure_time == 'admin' %} — Admin entry{% elif src.departure_time == 'sub' %} — Crew submitted{% endif %}">
+                        </td>
 
-                    <!-- Dept Time (editable time, center) -->
-                    <td class="src-{{ src.departure_time }} td-center">
-                        <input type="time" class="dt-input {% if crew.is_rtis_departure %}dept-rtis{% elif src.departure_time == 'admin' %}dept-admin{% elif src.departure_time == 'sub' %}dept-sub{% endif %}"
-                               data-field="departure_time" data-crew="{{ crew.crew_id }}"
-                               data-raw="{{ crew.departure_time if crew.departure_time else '' }}"
-                               title="Dept: {{ crew.departure_time if crew.departure_time else 'Not set' }}{% if crew.is_rtis_departure %} — RTIS auto-frozen{% elif src.departure_time == 'admin' %} — Admin entry{% elif src.departure_time == 'sub' %} — Crew submitted{% endif %}">
-                    </td>
+                        <!-- PDD -->
+                        <td style="color:#f87171;font-weight:700;">{{ crew.pdd }}</td>
 
-                    <!-- PDD -->
-                    <td style="color:#f87171;font-weight:700;">{{ crew.pdd }}</td>
+                        <!-- Duty Hours (live) -->
+                        <td>
+                            <span class="duty-cell" id="duty-{{ crew.crew_id }}" data-signon="{{ crew._sign_on_iso }}">
+                                {{ crew.duty_hrs if crew.duty_hrs else '–' }}
+                            </span>
+                        </td>
 
-                    <!-- Duty Hours (live) -->
-                    <td>
-                        <span class="duty-cell" id="duty-{{ crew.crew_id }}"
-                              data-signon="{{ crew._sign_on_iso }}">
-                            {{ crew.duty_hrs if crew.duty_hrs else '–' }}
-                        </span>
-                    </td>
+                        <!-- From Stn -->
+                        <td>{{ crew.from_sttn }}</td>
 
-                    <!-- From Stn -->
-                    <td>{{ crew.from_sttn }}</td>
+                        <!-- To Stn -->
+                        <td>{{ crew.to_sttn if crew.to_sttn else '–' }}</td>
 
-                    <!-- To Stn -->
-                    <td>{{ crew.to_sttn if crew.to_sttn else '–' }}</td>
-
-                    <!-- Loco No (editable, center) -->
-                    <td class="src-{{ src.loco_no }} td-center">
-                        <span class="editable" contenteditable="true"
-                              data-field="loco_no" data-crew="{{ crew.crew_id }}">{{ crew.loco_no if crew.loco_no else '' }}</span>
-                        {% if crew._latest_rtis_loco %}
-                            <div style="font-size: 9px; color: #60a5fa; margin-top: 2px; line-height: 1.1; display: flex; align-items: center; justify-content: center; gap: 2px;" title="RTIS Updated: {{ crew._latest_rtis_loco.time }}&#10;Lat: {{ crew._latest_rtis_loco.lat }}&#10;Lon: {{ crew._latest_rtis_loco.lon }}">
-                                <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        <!-- Loco No (editable, center) -->
+                        <td class="src-{{ src.loco_no }} td-center">
+                            <span class="editable" contenteditable="true" data-field="loco_no"
+                                data-crew="{{ crew.crew_id }}">{{ crew.loco_no if crew.loco_no else '' }}</span>
+                            {% if crew._latest_rtis_loco %}
+                            <div style="font-size: 9px; color: #60a5fa; margin-top: 2px; line-height: 1.1; display: flex; align-items: center; justify-content: center; gap: 2px;"
+                                title="RTIS Updated: {{ crew._latest_rtis_loco.time }}&#10;Lat: {{ crew._latest_rtis_loco.lat }}&#10;Lon: {{ crew._latest_rtis_loco.lon }}">
+                                <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z">
+                                    </path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                </svg>
                                 {{ crew._latest_rtis_loco.loc }}
                             </div>
-                        {% endif %}
-                    </td>
+                            {% endif %}
+                        </td>
 
-                    <!-- Train No (editable) -->
-                    <td class="src-{{ src.train_no }}">
-                        <span class="editable" contenteditable="true"
-                              data-field="train_no" data-crew="{{ crew.crew_id }}">{{ crew.train_no if crew.train_no else '' }}</span>
-                    </td>
+                        <!-- Train No (editable) -->
+                        <td class="src-{{ src.train_no }}">
+                            <span class="editable" contenteditable="true" data-field="train_no"
+                                data-crew="{{ crew.crew_id }}">{{ crew.train_no if crew.train_no else '' }}</span>
+                        </td>
 
-                    <!-- BPC No (editable, center) -->
-                    <td class="src-{{ src.bpc_no }} td-center">
-                        <span class="editable" contenteditable="true"
-                              data-field="bpc_no" data-crew="{{ crew.crew_id }}">{{ crew.bpc_no if crew.bpc_no else '' }}</span>
-                    </td>
+                        <!-- BPC No (editable, center) -->
+                        <td class="src-{{ src.bpc_no }} td-center">
+                            <span class="editable" contenteditable="true" data-field="bpc_no"
+                                data-crew="{{ crew.crew_id }}">{{ crew.bpc_no if crew.bpc_no else '' }}</span>
+                        </td>
 
-                    <!-- Location (autocomplete station, center) -->
-                    <td class="src-{{ src.current_location }} td-center">
-                        <div class="ac-wrap">
-                            <input type="text" class="ac-input"
-                                   data-field="current_location" data-crew="{{ crew.crew_id }}"
-                                   value="{{ crew.current_location if crew.current_location else '' }}"
-                                   placeholder="Stn" autocomplete="off" maxlength="10"
-                                   {% if crew.is_rtis_location %}style="color: #60a5fa; font-weight: 700; background: rgba(96,165,250,0.1);"{% endif %}>
-                            <div class="ac-dropdown"></div>
-                        </div>
-                        {% if crew._loc_update_time %}
-                        <div class="location-time" style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
-                            {{ crew._loc_update_time }}
-                        </div>
-                        {% endif %}
-                    </td>
-
-                    <!-- Relief (checkbox + station autocomplete + datetime) -->
-                    <td class="src-{{ src.relief_station }} td-center">
-                        {% if crew.is_relief == 1 %}
-                            <div class="flex flex-col items-center">
-                                <span style="color:#f59e0b;font-weight:700;">{{ crew.relief_station if crew.relief_station else 'RELIEF' }}</span>
-                                <span style="font-size:10px;color:#94a3b8;margin-top:2px;">{{ crew.relief_datetime if crew.relief_datetime else '' }}</span>
+                        <!-- Location (autocomplete station, center) -->
+                        <td class="src-{{ src.current_location }} td-center">
+                            <div class="ac-wrap">
+                                <input type="text" class="ac-input" data-field="current_location"
+                                    data-crew="{{ crew.crew_id }}"
+                                    value="{{ crew.current_location if crew.current_location else '' }}"
+                                    placeholder="Stn" autocomplete="off" maxlength="10" {% if crew.is_rtis_location
+                                    %}style="color: #60a5fa; font-weight: 700; background: rgba(96,165,250,0.1);" {%
+                                    endif %}>
+                                <div class="ac-dropdown"></div>
                             </div>
-                        {% else %}
+                            {% if crew._loc_update_time %}
+                            <div class="location-time" style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                                {{ crew._loc_update_time }}
+                            </div>
+                            {% endif %}
+                        </td>
+
+                        <!-- Relief (checkbox + station autocomplete + datetime) -->
+                        <td class="src-{{ src.relief_station }} td-center">
+                            {% if crew.is_relief == 1 %}
+                            <div class="flex flex-col items-center">
+                                <span style="color:#f59e0b;font-weight:700;">{{ crew.relief_station if
+                                    crew.relief_station else 'RELIEF' }}</span>
+                                <span style="font-size:10px;color:#94a3b8;margin-top:2px;">{{ crew.relief_datetime if
+                                    crew.relief_datetime else '' }}</span>
+                            </div>
+                            {% else %}
                             <div class="relief-wrap">
                                 <label class="relief-check-row" style="cursor: pointer;">
                                     <input type="checkbox" class="relief-toggle" data-crew="{{ crew.crew_id }}">
@@ -485,581 +1177,583 @@
                                 </label>
                                 <div class="relief-fields hidden-fields">
                                     <div class="relief-stn-wrap">
-                                        <input type="text" class="relief-stn-input"
-                                               data-field="relief_station" data-crew="{{ crew.crew_id }}"
-                                               placeholder="Station" autocomplete="off" maxlength="10">
+                                        <input type="text" class="relief-stn-input" data-field="relief_station"
+                                            data-crew="{{ crew.crew_id }}" placeholder="Station" autocomplete="off"
+                                            maxlength="10">
                                         <div class="relief-ac-dropdown"></div>
                                     </div>
-                                    <input type="time" class="relief-dt-input"
-                                           data-field="relief_datetime" data-crew="{{ crew.crew_id }}"
-                                           data-raw="">
+                                    <input type="time" class="relief-dt-input" data-field="relief_datetime"
+                                        data-crew="{{ crew.crew_id }}" data-raw="">
                                 </div>
                             </div>
-                        {% endif %}
-                    </td>
+                            {% endif %}
+                        </td>
 
 
-                    <!-- Mobile No (all numbers + add button) -->
-                    <td>
-                        <div class="phone-wrap">
-                            <span class="phone-numbers" id="phone-{{ crew.crew_id }}">
-                                {% if crew.mobile_number %}
+                        <!-- Mobile No (all numbers + add button) -->
+                        <td>
+                            <div class="phone-wrap">
+                                <span class="phone-numbers" id="phone-{{ crew.crew_id }}">
+                                    {% if crew.mobile_number %}
                                     {% for num in crew.mobile_number.split(',') %}
-                                        <span class="phone-num-line">{{ num.strip() }}</span>
+                                    <span class="phone-num-line">{{ num.strip() }}</span>
                                     {% endfor %}
-                                {% else %}
+                                    {% else %}
                                     <span style="color:#475569">–</span>
-                                {% endif %}
-                            </span>
-                            <button class="btn-add-phone" title="Add phone number"
+                                    {% endif %}
+                                </span>
+                                <button class="btn-add-phone" title="Add phone number"
                                     onclick="openPhonePopover(event, '{{ crew.crew_id }}')">+</button>
-                        </div>
-                    </td>
+                            </div>
+                        </td>
 
-                    <!-- Found in NS -->
-                    <td style="text-align:center;" data-val="{{ '1' if crew.found_in_ns == 'yes' else '0' }}">
-                        <input type="checkbox" class="ns-checkbox"
-                               data-crew="{{ crew.crew_id }}" data-is-relief="{{ crew.is_relief }}"
-                               {% if crew.found_in_ns == 'yes' %}checked{% endif %}>
-                    </td>
-                </tr>
-                {% endfor %}
-                {% if not crew_list %}
-                                <tr class="empty-row"><td colspan="17">No crew records found.</td></tr>
-                {% endif %}
-            </tbody>
-        </table>
+                        <!-- Found in NS -->
+                        <td style="text-align:center;" data-val="{{ '1' if crew.found_in_ns == 'yes' else '0' }}">
+                            <input type="checkbox" class="ns-checkbox" data-crew="{{ crew.crew_id }}"
+                                data-is-relief="{{ crew.is_relief }}" {% if crew.found_in_ns=='yes' %}checked{% endif
+                                %}>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not crew_list %}
+                    <tr class="empty-row">
+                        <td colspan="17">No crew records found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
 
-<!-- PHONE POPOVER -->
-<div id="phonePopover" class="phone-popover">
-    <div class="popover-title" id="popoverTitle">Add Phone Number</div>
-    <input type="tel" id="popoverInput" class="popover-input" placeholder="Enter number" maxlength="15">
-    <div class="popover-actions">
-        <button class="btn-pop-save" onclick="submitPhone()">Save</button>
-        <button class="btn-pop-cancel" onclick="closePhonePopover()">Cancel</button>
+    <!-- PHONE POPOVER -->
+    <div id="phonePopover" class="phone-popover">
+        <div class="popover-title" id="popoverTitle">Add Phone Number</div>
+        <input type="tel" id="popoverInput" class="popover-input" placeholder="Enter number" maxlength="15">
+        <div class="popover-actions">
+            <button class="btn-pop-save" onclick="submitPhone()">Save</button>
+            <button class="btn-pop-cancel" onclick="closePhonePopover()">Cancel</button>
+        </div>
     </div>
-</div>
 
-<div id="toast" class="toast"></div>
+    <div id="toast" class="toast"></div>
 
-<script>
-/* ================================================================
-   UTILITIES
-   ================================================================ */
-function getISTNow() {
-    const now = new Date();
-    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-    return new Date(utcMs + 5.5 * 3600000);
-}
-
-function toISOLocal(dt) {
-    // Date object -> "YYYY-MM-DDTHH:MM" for datetime-local input
-    const pad = n => String(n).padStart(2, '0');
-    return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-}
-
-function fromDatetimeLocal(str) {
-    // "2026-07-11T15:30" -> "11-07-2026 15:30" (format backend can parse)
-    if (!str) return '';
-    const [datePart, timePart] = str.split('T');
-    if (!datePart) return str;
-    const [y, m, d] = datePart.split('-');
-    return `${d}-${m}-${y} ${timePart || '00:00'}`;
-}
-
-function parseDisplayDate(str) {
-    // Parses "DD/MM/YY HH:MM" or "DD-MM-YYYY HH:MM" -> Date object
-    if (!str || str === '–' || str === '-') return null;
-    let m;
-    m = str.match(/^(\d{2})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})$/);
-    if (m) return new Date(`20${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`);
-    m = str.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
-    if (m) return new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`);
-    return null;
-}
-
-function showToast(msg, type = 'success') {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = `toast ${type} show`;
-    setTimeout(() => { t.className = `toast ${type}`; }, 3000);
-}
-
-/* ================================================================
-   DUTY HOURS – LIVE CALCULATION + GRADIENT
-   ================================================================ */
-function minutesToHHMM(m) { return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`; }
-function getDutyClass(m) {
-    if (m >= 600) return 'dh-critical';
-    if (m >= 480) return 'dh-high';
-    if (m >= 360) return 'dh-mid';
-    if (m >= 240) return 'dh-low';
-    return 'dh-ok';
-}
-function updateDutyHours() {
-    const now = getISTNow();
-    document.querySelectorAll('.duty-cell[data-signon]').forEach(cell => {
-        const iso = cell.dataset.signon;
-        if (!iso) return;
-        const signOn = new Date(iso + '+05:30');
-        if (isNaN(signOn.getTime())) return;
-        const mins = Math.max(0, Math.floor((now - signOn) / 60000));
-        cell.textContent = minutesToHHMM(mins);
-        cell.classList.remove('dh-critical','dh-high','dh-mid','dh-low','dh-ok');
-        cell.classList.add(getDutyClass(mins));
-    });
-}
-updateDutyHours();
-setInterval(updateDutyHours, 30000);
-
-/* ================================================================
-   PER-FIELD DIRTY TRACKING
-   Tracks only the specific fields admin has changed.
-   Key: "crewId|||field", Value: getter function returning the value to save
-   ================================================================ */
-const dirtyFields = new Map(); // key -> getter fn
-
-function markFieldDirty(crewId, field, getter) {
-    const key = `${crewId}|||${field}`;
-    dirtyFields.set(key, getter);
-    // Visual indicator on the input
-}
-
-/* ================================================================
-   INITIALISE DATETIME-LOCAL INPUTS from server-rendered raw value
-   ================================================================ */
-document.querySelectorAll('.dt-input, .relief-dt-input').forEach(inp => {
-    const raw = inp.dataset.raw;
-    
-    if (inp.type === 'time') {
-        if (raw && raw !== '-' && raw !== '–') {
-            // raw might be "14:30" or "DD/MM/YY HH:MM"
-            const parts = raw.split(' ');
-            inp.value = parts.length === 2 ? parts[1] : raw;
+    <script>
+        /* ================================================================
+           UTILITIES
+           ================================================================ */
+        function getISTNow() {
+            const now = new Date();
+            const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+            return new Date(utcMs + 5.5 * 3600000);
         }
-        inp.addEventListener('change', () => {
-            inp.classList.add('field-dirty');
-            markFieldDirty(inp.dataset.crew, inp.dataset.field, () => inp.value);
-        });
-    } else {
-        const dt = parseDisplayDate(raw);
-        if (dt && !isNaN(dt.getTime())) inp.value = toISOLocal(dt);
 
-        inp.addEventListener('change', () => {
-            inp.classList.add('field-dirty');
-            markFieldDirty(inp.dataset.crew, inp.dataset.field, () => fromDatetimeLocal(inp.value));
-        });
-    }
-});
+        function toISOLocal(dt) {
+            // Date object -> "YYYY-MM-DDTHH:MM" for datetime-local input
+            const pad = n => String(n).padStart(2, '0');
+            return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+        }
 
-/* ================================================================
-   EDITABLE SPANS (loco, train, bpc)
-   ================================================================ */
-document.querySelectorAll('.editable').forEach(el => {
-    el.addEventListener('input', () => {
-        el.classList.add('field-dirty');
-        const crew = el.dataset.crew;
-        const field = el.dataset.field;
-        markFieldDirty(crew, field, () => el.textContent.trim().toUpperCase());
-    });
-    el.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); el.blur(); return; }
-        
-        // Strict validation for loco_no: only allow digits and comma
-        if (el.dataset.field === 'loco_no') {
-            if (e.ctrlKey || e.metaKey || e.key.length > 1) return; // Allow controls/nav
-            if (!/^[0-9,]$/.test(e.key)) {
-                e.preventDefault();
+        function fromDatetimeLocal(str) {
+            // "2026-07-11T15:30" -> "11-07-2026 15:30" (format backend can parse)
+            if (!str) return '';
+            const [datePart, timePart] = str.split('T');
+            if (!datePart) return str;
+            const [y, m, d] = datePart.split('-');
+            return `${d}-${m}-${y} ${timePart || '00:00'}`;
+        }
+
+        function parseDisplayDate(str) {
+            // Parses "DD/MM/YY HH:MM" or "DD-MM-YYYY HH:MM" -> Date object
+            if (!str || str === '–' || str === '-') return null;
+            let m;
+            m = str.match(/^(\d{2})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})$/);
+            if (m) return new Date(`20${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`);
+            m = str.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
+            if (m) return new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`);
+            return null;
+        }
+
+        function showToast(msg, type = 'success') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = `toast ${type} show`;
+            setTimeout(() => { t.className = `toast ${type}`; }, 3000);
+        }
+
+        /* ================================================================
+           DUTY HOURS – LIVE CALCULATION + GRADIENT
+           ================================================================ */
+        function minutesToHHMM(m) { return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
+        function getDutyClass(m) {
+            if (m >= 600) return 'dh-critical';
+            if (m >= 480) return 'dh-high';
+            if (m >= 360) return 'dh-mid';
+            if (m >= 240) return 'dh-low';
+            return 'dh-ok';
+        }
+        function updateDutyHours() {
+            const now = getISTNow();
+            document.querySelectorAll('.duty-cell[data-signon]').forEach(cell => {
+                const iso = cell.dataset.signon;
+                if (!iso) return;
+                const signOn = new Date(iso + '+05:30');
+                if (isNaN(signOn.getTime())) return;
+                const mins = Math.max(0, Math.floor((now - signOn) / 60000));
+                cell.textContent = minutesToHHMM(mins);
+                cell.classList.remove('dh-critical', 'dh-high', 'dh-mid', 'dh-low', 'dh-ok');
+                cell.classList.add(getDutyClass(mins));
+            });
+        }
+        updateDutyHours();
+        setInterval(updateDutyHours, 30000);
+
+        /* ================================================================
+           PER-FIELD DIRTY TRACKING
+           Tracks only the specific fields admin has changed.
+           Key: "crewId|||field", Value: getter function returning the value to save
+           ================================================================ */
+        const dirtyFields = new Map(); // key -> getter fn
+
+        function markFieldDirty(crewId, field, getter) {
+            const key = `${crewId}|||${field}`;
+            dirtyFields.set(key, getter);
+            // Visual indicator on the input
+        }
+
+        /* ================================================================
+           INITIALISE DATETIME-LOCAL INPUTS from server-rendered raw value
+           ================================================================ */
+        document.querySelectorAll('.dt-input, .relief-dt-input').forEach(inp => {
+            const raw = inp.dataset.raw;
+
+            if (inp.type === 'time') {
+                if (raw && raw !== '-' && raw !== '–') {
+                    // raw might be "14:30" or "DD/MM/YY HH:MM"
+                    const parts = raw.split(' ');
+                    inp.value = parts.length === 2 ? parts[1] : raw;
+                }
+                inp.addEventListener('change', () => {
+                    inp.classList.add('field-dirty');
+                    markFieldDirty(inp.dataset.crew, inp.dataset.field, () => inp.value);
+                });
+            } else {
+                const dt = parseDisplayDate(raw);
+                if (dt && !isNaN(dt.getTime())) inp.value = toISOLocal(dt);
+
+                inp.addEventListener('change', () => {
+                    inp.classList.add('field-dirty');
+                    markFieldDirty(inp.dataset.crew, inp.dataset.field, () => fromDatetimeLocal(inp.value));
+                });
             }
+        });
+
+        /* ================================================================
+           EDITABLE SPANS (loco, train, bpc)
+           ================================================================ */
+        document.querySelectorAll('.editable').forEach(el => {
+            el.addEventListener('input', () => {
+                el.classList.add('field-dirty');
+                const crew = el.dataset.crew;
+                const field = el.dataset.field;
+                markFieldDirty(crew, field, () => el.textContent.trim().toUpperCase());
+            });
+            el.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); el.blur(); return; }
+
+                // Strict validation for loco_no: only allow digits and comma
+                if (el.dataset.field === 'loco_no') {
+                    if (e.ctrlKey || e.metaKey || e.key.length > 1) return; // Allow controls/nav
+                    if (!/^[0-9,]$/.test(e.key)) {
+                        e.preventDefault();
+                    }
+                }
+            });
+            el.addEventListener('paste', e => {
+                if (el.dataset.field === 'loco_no') {
+                    e.preventDefault();
+                    let paste = (e.clipboardData || window.clipboardData).getData('text');
+                    paste = paste.replace(/[^0-9,]/g, '');
+                    document.execCommand("insertText", false, paste);
+                }
+            });
+        });
+
+        /* ================================================================
+           STATION AUTOCOMPLETE (Location + Relief Station)
+           ================================================================ */
+        let stationList = [];
+
+        async function loadStations() {
+            try {
+                const r = await fetch('/api/stations');
+                stationList = await r.json();
+            } catch (e) { console.warn('Could not load stations:', e); }
         }
-    });
-    el.addEventListener('paste', e => {
-        if (el.dataset.field === 'loco_no') {
-            e.preventDefault();
-            let paste = (e.clipboardData || window.clipboardData).getData('text');
-            paste = paste.replace(/[^0-9,]/g, '');
-            document.execCommand("insertText", false, paste);
-        }
-    });
-});
+        loadStations();
 
-/* ================================================================
-   STATION AUTOCOMPLETE (Location + Relief Station)
-   ================================================================ */
-let stationList = [];
-
-async function loadStations() {
-    try {
-        const r = await fetch('/api/stations');
-        stationList = await r.json();
-    } catch(e) { console.warn('Could not load stations:', e); }
-}
-loadStations();
-
-function buildAcDropdown(input, dropdown, onSelect) {
-    input.addEventListener('input', () => {
-        const q = input.value.trim().toUpperCase();
-        if (q.length < 1) { dropdown.style.display = 'none'; return; }
-        const matches = stationList.filter(s =>
-            s.code.toUpperCase().startsWith(q) ||
-            (s.name || '').toUpperCase().includes(q)
-        ).slice(0, 12);
-        if (!matches.length) { dropdown.style.display = 'none'; return; }
-        dropdown.innerHTML = matches.map(s =>
-            `<div class="ac-item" data-code="${s.code}">
+        function buildAcDropdown(input, dropdown, onSelect) {
+            input.addEventListener('input', () => {
+                const q = input.value.trim().toUpperCase();
+                if (q.length < 1) { dropdown.style.display = 'none'; return; }
+                const matches = stationList.filter(s =>
+                    s.code.toUpperCase().startsWith(q) ||
+                    (s.name || '').toUpperCase().includes(q)
+                ).slice(0, 12);
+                if (!matches.length) { dropdown.style.display = 'none'; return; }
+                dropdown.innerHTML = matches.map(s =>
+                    `<div class="ac-item" data-code="${s.code}">
                 <span class="ac-code">${s.code}</span>
                 <span class="ac-name">${s.name || ''}</span>
              </div>`
-        ).join('');
-        dropdown.style.display = 'block';
-        dropdown.querySelectorAll('.ac-item').forEach(item => {
-            item.addEventListener('mousedown', e => {
-                e.preventDefault();
-                onSelect(item.dataset.code);
-                dropdown.style.display = 'none';
+                ).join('');
+                dropdown.style.display = 'block';
+                dropdown.querySelectorAll('.ac-item').forEach(item => {
+                    item.addEventListener('mousedown', e => {
+                        e.preventDefault();
+                        onSelect(item.dataset.code);
+                        dropdown.style.display = 'none';
+                    });
+                });
             });
-        });
-    });
-    input.addEventListener('blur', () => {
-        setTimeout(() => { dropdown.style.display = 'none'; }, 150);
-    });
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Escape') dropdown.style.display = 'none';
-        if (e.key === 'Enter') {
-            const first = dropdown.querySelector('.ac-item');
-            if (first) { onSelect(first.dataset.code); dropdown.style.display = 'none'; e.preventDefault(); }
-        }
-    });
-}
-
-// Location autocomplete (main table)
-document.querySelectorAll('.ac-input').forEach(input => {
-    const dropdown = input.nextElementSibling;
-    const crew = input.dataset.crew;
-    const field = input.dataset.field;
-    buildAcDropdown(input, dropdown, code => {
-        input.value = code;
-        input.classList.add('field-dirty');
-        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
-    });
-    input.addEventListener('input', () => {
-        input.classList.add('field-dirty');
-        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
-    });
-});
-
-// Relief station autocomplete
-document.querySelectorAll('.relief-stn-input').forEach(input => {
-    const dropdown = input.nextElementSibling;
-    const crew = input.dataset.crew;
-    const field = input.dataset.field;
-    buildAcDropdown(input, dropdown, code => {
-        input.value = code;
-        input.classList.add('field-dirty');
-        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
-    });
-    input.addEventListener('input', () => {
-        input.classList.add('field-dirty');
-        markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
-    });
-});
-
-/* ================================================================
-   RELIEF TOGGLE CHECKBOX
-   ================================================================ */
-document.querySelectorAll('.relief-toggle').forEach(cb => {
-    cb.addEventListener('change', function () {
-        const crewId = this.dataset.crew;
-        const wrap = this.closest('.relief-wrap');
-        const fields = wrap.querySelector('.relief-fields');
-        if (this.checked) {
-            fields.classList.remove('hidden-fields');
-            // Auto-populate datetime with current IST
-            const dtInp = fields.querySelector('.relief-dt-input');
-            if (dtInp) {
-                dtInp.value = toISOLocal(getISTNow());
-                markFieldDirty(crewId, 'relief_datetime', () => fromDatetimeLocal(dtInp.value));
-            }
-        } else {
-            fields.classList.add('hidden-fields');
-        }
-        const checked = this.checked;
-        markFieldDirty(crewId, 'is_relief', () => checked ? '1' : '0');
-    });
-});
-
-/* ================================================================
-   NS CHECKBOX
-   ================================================================ */
-document.querySelectorAll('.ns-checkbox').forEach(cb => {
-    cb.addEventListener('change', function () {
-        const tr = this.closest('tr');
-        const td = this.closest('td');
-        const isRelief = this.dataset.isRelief === '1';
-        if (this.checked) { tr.className = 'row-ns'; td.setAttribute('data-val','1'); }
-        else { tr.className = isRelief ? 'row-relief' : ''; td.setAttribute('data-val','0'); }
-    });
-});
-
-/* ================================================================
-   AUTO-SAVE + TIMER
-   ================================================================ */
-const SAVE_INTERVAL = 10 * 60 * 1000;
-let timeLeft = SAVE_INTERVAL / 1000;
-
-function updateTimer() {
-    timeLeft--;
-    if (timeLeft <= 0) return;
-    const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
-    document.getElementById('timerBadge').textContent = `Save in ${m}:${String(s).padStart(2,'0')}`;
-}
-setInterval(updateTimer, 1000);
-
-function showSaveStatus(text, type) {
-    const el = document.getElementById('saveStatus');
-    el.textContent = text; el.className = `save-status ${type}`;
-}
-
-async function saveAndRefresh(manual = false) {
-    showSaveStatus('Saving…', 'saving');
-
-    // NS status (always save all)
-    const nsPayload = {};
-    document.querySelectorAll('.ns-checkbox').forEach(cb => {
-        nsPayload[cb.dataset.crew] = cb.checked ? 'yes' : 'no';
-    });
-
-    // Only save fields that admin actually touched (per-field dirty set)
-    const editSaves = [];
-    for (const [key, getter] of dirtyFields.entries()) {
-        const [crewId, field] = key.split('|||');
-        const value = getter();
-        editSaves.push({ crew_id: crewId, field, value });
-    }
-
-    try {
-        await fetch('/api/save_ns_status', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(nsPayload)
-        });
-        for (const edit of editSaves) {
-            await fetch('/api/admin_edit', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(edit)
+            input.addEventListener('blur', () => {
+                setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+            });
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Escape') dropdown.style.display = 'none';
+                if (e.key === 'Enter') {
+                    const first = dropdown.querySelector('.ac-item');
+                    if (first) { onSelect(first.dataset.code); dropdown.style.display = 'none'; e.preventDefault(); }
+                }
             });
         }
-        showSaveStatus('Saved ✓', 'saved');
-        if (manual) {
-            showToast(`Saved ${editSaves.length} field(s) successfully.`, 'success');
-            setTimeout(() => location.reload(), 800);
-        } else {
-            setTimeout(() => location.reload(), 600);
-        }
-    } catch(err) {
-        console.error('Save failed:', err);
-        showToast('Save failed. Will retry.', 'error');
-        showSaveStatus('Error', 'saving');
-    }
-}
 
-setTimeout(saveAndRefresh, SAVE_INTERVAL);
-
-/* ================================================================
-   PHONE POPOVER
-   ================================================================ */
-let currentPhoneCrew = null;
-
-function openPhonePopover(evt, crewId) {
-    currentPhoneCrew = crewId;
-    const pop = document.getElementById('phonePopover');
-    document.getElementById('popoverTitle').textContent = `Add phone – ${crewId}`;
-    document.getElementById('popoverInput').value = '';
-    pop.classList.add('visible');
-    const btn = evt.currentTarget, rect = btn.getBoundingClientRect(), popW = 240;
-    let left = rect.left - popW - 8;
-    if (left < 8) left = rect.right + 8;
-    let top = rect.top - 10;
-    if (top + 140 > window.innerHeight) top = window.innerHeight - 150;
-    pop.style.left = left + 'px'; pop.style.top = top + 'px';
-    setTimeout(() => document.getElementById('popoverInput').focus(), 50);
-    evt.stopPropagation();
-}
-function closePhonePopover() {
-    document.getElementById('phonePopover').classList.remove('visible');
-    currentPhoneCrew = null;
-}
-document.addEventListener('click', e => {
-    const pop = document.getElementById('phonePopover');
-    if (pop.classList.contains('visible') && !pop.contains(e.target)) closePhonePopover();
-});
-async function submitPhone() {
-    const phone = document.getElementById('popoverInput').value.trim();
-    if (!phone || !currentPhoneCrew) return;
-    try {
-        const res = await fetch('/api/add_phone', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ crew_id: currentPhoneCrew, phone })
+        // Location autocomplete (main table)
+        document.querySelectorAll('.ac-input').forEach(input => {
+            const dropdown = input.nextElementSibling;
+            const crew = input.dataset.crew;
+            const field = input.dataset.field;
+            buildAcDropdown(input, dropdown, code => {
+                input.value = code;
+                input.classList.add('field-dirty');
+                markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+            });
+            input.addEventListener('input', () => {
+                input.classList.add('field-dirty');
+                markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+            });
         });
-        const data = await res.json();
-        if (data.status === 'ok') {
-            const span = document.getElementById(`phone-${currentPhoneCrew}`);
-            if (span) {
-                const newLine = document.createElement('span');
-                newLine.className = 'phone-num-line';
-                newLine.textContent = phone;
-                // Remove placeholder dash if present
-                const dash = span.querySelector('span[style]');
-                if (dash) span.removeChild(dash);
-                span.appendChild(newLine);
-            }
-            showToast('Phone number added!', 'success');
-            closePhonePopover();
-        } else { showToast('Error saving.', 'error'); }
-    } catch { showToast('Network error.', 'error'); }
-}
-document.getElementById('popoverInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') submitPhone();
-    if (e.key === 'Escape') closePhonePopover();
-});
 
-/* ================================================================
-   TABLE SORTING
-   ================================================================ */
-const getCellText = (tr, idx) => {
-    const td = tr.children[idx]; if (!td) return '';
-    const duty = td.querySelector('.duty-cell');
-    if (duty && duty.dataset.signon) return duty.dataset.signon;
-    const inp = td.querySelector('input[type="text"], .ac-input');
-    if (inp) return inp.value;
-    const dt = td.querySelector('input[type="datetime-local"]');
-    if (dt) return dt.value;
-    const ed = td.querySelector('.editable');
-    if (ed) return ed.textContent;
-    return td.innerText || td.getAttribute('data-val') || '';
-};
-let sortCol = -1, sortAsc = true;
-document.querySelectorAll('th[data-col]').forEach(th => {
-    th.addEventListener('click', () => {
-        const idx = parseInt(th.dataset.col);
-        sortAsc = (sortCol === idx) ? !sortAsc : true;
-        sortCol = idx;
-        document.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc','sorted-desc'));
-        th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
-        const tbody = document.getElementById('tableBody');
-        Array.from(tbody.querySelectorAll('tr:not(.empty-row)'))
-            .sort((a, b) => {
-                const va = getCellText(a, idx), vb = getCellText(b, idx);
-                const cmp = (!isNaN(va) && !isNaN(vb) && va !== '' && vb !== '') ? va - vb : va.localeCompare(vb);
-                return sortAsc ? cmp : -cmp;
-            })
-            .forEach(tr => tbody.appendChild(tr));
-    });
-});
+        // Relief station autocomplete
+        document.querySelectorAll('.relief-stn-input').forEach(input => {
+            const dropdown = input.nextElementSibling;
+            const crew = input.dataset.crew;
+            const field = input.dataset.field;
+            buildAcDropdown(input, dropdown, code => {
+                input.value = code;
+                input.classList.add('field-dirty');
+                markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+            });
+            input.addEventListener('input', () => {
+                input.classList.add('field-dirty');
+                markFieldDirty(crew, field, () => input.value.trim().toUpperCase());
+            });
+        });
 
-/* ================================================================
-   LOBBY FILTER
-   ================================================================ */
-const LOBBY_STORAGE_KEY = 'cms_lobby_filter_v1';
-const ALL_LOBBIES = ['KGP','NMP','BLS','GTS','ADL','SRC','TPKR'];
+        /* ================================================================
+           RELIEF TOGGLE CHECKBOX
+           ================================================================ */
+        document.querySelectorAll('.relief-toggle').forEach(cb => {
+            cb.addEventListener('change', function () {
+                const crewId = this.dataset.crew;
+                const wrap = this.closest('.relief-wrap');
+                const fields = wrap.querySelector('.relief-fields');
+                if (this.checked) {
+                    fields.classList.remove('hidden-fields');
+                    // Auto-populate datetime with current IST
+                    const dtInp = fields.querySelector('.relief-dt-input');
+                    if (dtInp) {
+                        dtInp.value = toISOLocal(getISTNow());
+                        markFieldDirty(crewId, 'relief_datetime', () => fromDatetimeLocal(dtInp.value));
+                    }
+                } else {
+                    fields.classList.add('hidden-fields');
+                }
+                const checked = this.checked;
+                markFieldDirty(crewId, 'is_relief', () => checked ? '1' : '0');
+            });
+        });
 
-let selectedLobbies = new Set();
+        /* ================================================================
+           NS CHECKBOX
+           ================================================================ */
+        document.querySelectorAll('.ns-checkbox').forEach(cb => {
+            cb.addEventListener('change', function () {
+                const tr = this.closest('tr');
+                const td = this.closest('td');
+                const isRelief = this.dataset.isRelief === '1';
+                if (this.checked) { tr.className = 'row-ns'; td.setAttribute('data-val', '1'); }
+                else { tr.className = isRelief ? 'row-relief' : ''; td.setAttribute('data-val', '0'); }
+            });
+        });
 
-(function initLobbyFilter() {
-    let saved = [];
-    try { saved = JSON.parse(localStorage.getItem(LOBBY_STORAGE_KEY) || '[]'); } catch(e) {}
-    if (!Array.isArray(saved) || saved.length === 0) {
-        // Default: ALL selected
-        selectedLobbies = new Set(['ALL']);
-    } else {
-        selectedLobbies = new Set(saved);
-    }
-    renderChips();
-})();
+        /* ================================================================
+           AUTO-SAVE + TIMER
+           ================================================================ */
+        const SAVE_INTERVAL = 10 * 60 * 1000;
+        let timeLeft = SAVE_INTERVAL / 1000;
 
-function renderChips() {
-    const isAll = selectedLobbies.has('ALL');
-    document.querySelectorAll('.lobby-chip').forEach(chip => {
-        const l = chip.dataset.lobby;
-        if (l === 'ALL') {
-            chip.classList.toggle('active', isAll);
-        } else {
-            chip.classList.toggle('active', !isAll && selectedLobbies.has(l));
+        function updateTimer() {
+            timeLeft--;
+            if (timeLeft <= 0) return;
+            const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
+            document.getElementById('timerBadge').textContent = `Save in ${m}:${String(s).padStart(2, '0')}`;
         }
-    });
-}
+        setInterval(updateTimer, 1000);
 
-function persistLobbies() {
-    const arr = selectedLobbies.has('ALL') ? ['ALL'] : Array.from(selectedLobbies);
-    localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify(arr));
-}
+        function showSaveStatus(text, type) {
+            const el = document.getElementById('saveStatus');
+            el.textContent = text; el.className = `save-status ${type}`;
+        }
 
-document.querySelectorAll('.lobby-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-        const l = chip.dataset.lobby;
-        if (l === 'ALL') {
-            selectedLobbies = new Set(['ALL']);
-        } else {
-            selectedLobbies.delete('ALL');
-            if (selectedLobbies.has(l)) {
-                selectedLobbies.delete(l);
-                if (selectedLobbies.size === 0) selectedLobbies.add('ALL');
+        async function saveAndRefresh(manual = false) {
+            showSaveStatus('Saving…', 'saving');
+
+            // NS status (always save all)
+            const nsPayload = {};
+            document.querySelectorAll('.ns-checkbox').forEach(cb => {
+                nsPayload[cb.dataset.crew] = cb.checked ? 'yes' : 'no';
+            });
+
+            // Only save fields that admin actually touched (per-field dirty set)
+            const editSaves = [];
+            for (const [key, getter] of dirtyFields.entries()) {
+                const [crewId, field] = key.split('|||');
+                const value = getter();
+                editSaves.push({ crew_id: crewId, field, value });
+            }
+
+            try {
+                await fetch('/api/save_ns_status', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(nsPayload)
+                });
+                for (const edit of editSaves) {
+                    await fetch('/api/admin_edit', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(edit)
+                    });
+                }
+                showSaveStatus('Saved ✓', 'saved');
+                if (manual) {
+                    showToast(`Saved ${editSaves.length} field(s) successfully.`, 'success');
+                    setTimeout(() => location.reload(), 800);
+                } else {
+                    setTimeout(() => location.reload(), 600);
+                }
+            } catch (err) {
+                console.error('Save failed:', err);
+                showToast('Save failed. Will retry.', 'error');
+                showSaveStatus('Error', 'saving');
+            }
+        }
+
+        setTimeout(saveAndRefresh, SAVE_INTERVAL);
+
+        /* ================================================================
+           PHONE POPOVER
+           ================================================================ */
+        let currentPhoneCrew = null;
+
+        function openPhonePopover(evt, crewId) {
+            currentPhoneCrew = crewId;
+            const pop = document.getElementById('phonePopover');
+            document.getElementById('popoverTitle').textContent = `Add phone – ${crewId}`;
+            document.getElementById('popoverInput').value = '';
+            pop.classList.add('visible');
+            const btn = evt.currentTarget, rect = btn.getBoundingClientRect(), popW = 240;
+            let left = rect.left - popW - 8;
+            if (left < 8) left = rect.right + 8;
+            let top = rect.top - 10;
+            if (top + 140 > window.innerHeight) top = window.innerHeight - 150;
+            pop.style.left = left + 'px'; pop.style.top = top + 'px';
+            setTimeout(() => document.getElementById('popoverInput').focus(), 50);
+            evt.stopPropagation();
+        }
+        function closePhonePopover() {
+            document.getElementById('phonePopover').classList.remove('visible');
+            currentPhoneCrew = null;
+        }
+        document.addEventListener('click', e => {
+            const pop = document.getElementById('phonePopover');
+            if (pop.classList.contains('visible') && !pop.contains(e.target)) closePhonePopover();
+        });
+        async function submitPhone() {
+            const phone = document.getElementById('popoverInput').value.trim();
+            if (!phone || !currentPhoneCrew) return;
+            try {
+                const res = await fetch('/api/add_phone', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ crew_id: currentPhoneCrew, phone })
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    const span = document.getElementById(`phone-${currentPhoneCrew}`);
+                    if (span) {
+                        const newLine = document.createElement('span');
+                        newLine.className = 'phone-num-line';
+                        newLine.textContent = phone;
+                        // Remove placeholder dash if present
+                        const dash = span.querySelector('span[style]');
+                        if (dash) span.removeChild(dash);
+                        span.appendChild(newLine);
+                    }
+                    showToast('Phone number added!', 'success');
+                    closePhonePopover();
+                } else { showToast('Error saving.', 'error'); }
+            } catch { showToast('Network error.', 'error'); }
+        }
+        document.getElementById('popoverInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter') submitPhone();
+            if (e.key === 'Escape') closePhonePopover();
+        });
+
+        /* ================================================================
+           TABLE SORTING
+           ================================================================ */
+        const getCellText = (tr, idx) => {
+            const td = tr.children[idx]; if (!td) return '';
+            const duty = td.querySelector('.duty-cell');
+            if (duty && duty.dataset.signon) return duty.dataset.signon;
+            const inp = td.querySelector('input[type="text"], .ac-input');
+            if (inp) return inp.value;
+            const dt = td.querySelector('input[type="datetime-local"]');
+            if (dt) return dt.value;
+            const ed = td.querySelector('.editable');
+            if (ed) return ed.textContent;
+            return td.innerText || td.getAttribute('data-val') || '';
+        };
+        let sortCol = -1, sortAsc = true;
+        document.querySelectorAll('th[data-col]').forEach(th => {
+            th.addEventListener('click', () => {
+                const idx = parseInt(th.dataset.col);
+                sortAsc = (sortCol === idx) ? !sortAsc : true;
+                sortCol = idx;
+                document.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+                th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+                const tbody = document.getElementById('tableBody');
+                Array.from(tbody.querySelectorAll('tr:not(.empty-row)'))
+                    .sort((a, b) => {
+                        const va = getCellText(a, idx), vb = getCellText(b, idx);
+                        const cmp = (!isNaN(va) && !isNaN(vb) && va !== '' && vb !== '') ? va - vb : va.localeCompare(vb);
+                        return sortAsc ? cmp : -cmp;
+                    })
+                    .forEach(tr => tbody.appendChild(tr));
+            });
+        });
+
+        /* ================================================================
+           LOBBY FILTER
+           ================================================================ */
+        const LOBBY_STORAGE_KEY = 'cms_lobby_filter_v1';
+        const ALL_LOBBIES = ['KGP', 'NMP', 'BLS', 'GTS', 'ADL', 'SRC', 'TPKR'];
+
+        let selectedLobbies = new Set();
+
+        (function initLobbyFilter() {
+            let saved = [];
+            try { saved = JSON.parse(localStorage.getItem(LOBBY_STORAGE_KEY) || '[]'); } catch (e) { }
+            if (!Array.isArray(saved) || saved.length === 0) {
+                // Default: ALL selected
+                selectedLobbies = new Set(['ALL']);
             } else {
-                selectedLobbies.add(l);
+                selectedLobbies = new Set(saved);
             }
+            renderChips();
+        })();
+
+        function renderChips() {
+            const isAll = selectedLobbies.has('ALL');
+            document.querySelectorAll('.lobby-chip').forEach(chip => {
+                const l = chip.dataset.lobby;
+                if (l === 'ALL') {
+                    chip.classList.toggle('active', isAll);
+                } else {
+                    chip.classList.toggle('active', !isAll && selectedLobbies.has(l));
+                }
+            });
         }
-        renderChips();
-        persistLobbies();
+
+        function persistLobbies() {
+            const arr = selectedLobbies.has('ALL') ? ['ALL'] : Array.from(selectedLobbies);
+            localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify(arr));
+        }
+
+        document.querySelectorAll('.lobby-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const l = chip.dataset.lobby;
+                if (l === 'ALL') {
+                    selectedLobbies = new Set(['ALL']);
+                } else {
+                    selectedLobbies.delete('ALL');
+                    if (selectedLobbies.has(l)) {
+                        selectedLobbies.delete(l);
+                        if (selectedLobbies.size === 0) selectedLobbies.add('ALL');
+                    } else {
+                        selectedLobbies.add(l);
+                    }
+                }
+                renderChips();
+                persistLobbies();
+                applyFilters();
+            });
+        });
+
+        /* ================================================================
+           SEARCH
+           ================================================================ */
+        document.getElementById('searchInput').addEventListener('input', applyFilters);
+
+        function applyFilters() {
+            const searchText = document.getElementById('searchInput').value.toLowerCase();
+            const isAll = selectedLobbies.has('ALL');
+            document.querySelectorAll('#tableBody tr').forEach(row => {
+                if (row.classList.contains('empty-row')) return;
+                const lobbyMatch = isAll || selectedLobbies.has(row.dataset.lobby);
+                const searchMatch = !searchText || row.innerText.toLowerCase().includes(searchText);
+                row.style.display = (lobbyMatch && searchMatch) ? '' : 'none';
+            });
+        }
+
+        // Apply filters on page load to respect persisted state
         applyFilters();
-    });
-});
 
-/* ================================================================
-   SEARCH
-   ================================================================ */
-document.getElementById('searchInput').addEventListener('input', applyFilters);
-
-function applyFilters() {
-    const searchText = document.getElementById('searchInput').value.toLowerCase();
-    const isAll = selectedLobbies.has('ALL');
-    document.querySelectorAll('#tableBody tr').forEach(row => {
-        if (row.classList.contains('empty-row')) return;
-        const lobbyMatch = isAll || selectedLobbies.has(row.dataset.lobby);
-        const searchMatch = !searchText || row.innerText.toLowerCase().includes(searchText);
-        row.style.display = (lobbyMatch && searchMatch) ? '' : 'none';
-    });
-}
-
-// Apply filters on page load to respect persisted state
-applyFilters();
-
-/* ================================================================
-   EXPORT CSV
-   ================================================================ */
-function exportTableToCSV(filename) {
-    const csv = [];
-    document.querySelectorAll('#crewTable tr').forEach(row => {
-        if (row.style.display === 'none' || row.classList.contains('empty-row')) return;
-        const rowData = [];
-        Array.from(row.querySelectorAll('td, th')).forEach((td, ci) => {
-            if (ci === 15) {
-                const inp = td.querySelector('input[type="checkbox"]');
-                rowData.push(inp ? (inp.checked ? 'Yes' : 'No') : 'NS');
-            } else if (ci === 11 || ci === 12) {
-                const dtInp = td.querySelector('input[type="datetime-local"]');
-                rowData.push(`"${dtInp ? fromDatetimeLocal(dtInp.value) : td.innerText.trim()}"`);
-            } else {
-                rowData.push(`"${td.innerText.replace(/[\r\n]+/g,' ').replace(/"/g,'""')}"`);
-            }
-        });
-        csv.push(rowData.join(','));
-    });
-    const link = document.createElement('a');
-    link.download = filename;
-    link.href = URL.createObjectURL(new Blob([csv.join('\n')], { type: 'text/csv' }));
-    link.click();
-}
-</script>
+        /* ================================================================
+           EXPORT CSV
+           ================================================================ */
+        function exportTableToCSV(filename) {
+            const csv = [];
+            document.querySelectorAll('#crewTable tr').forEach(row => {
+                if (row.style.display === 'none' || row.classList.contains('empty-row')) return;
+                const rowData = [];
+                Array.from(row.querySelectorAll('td, th')).forEach((td, ci) => {
+                    if (ci === 15) {
+                        const inp = td.querySelector('input[type="checkbox"]');
+                        rowData.push(inp ? (inp.checked ? 'Yes' : 'No') : 'NS');
+                    } else if (ci === 11 || ci === 12) {
+                        const dtInp = td.querySelector('input[type="datetime-local"]');
+                        rowData.push(`"${dtInp ? fromDatetimeLocal(dtInp.value) : td.innerText.trim()}"`);
+                    } else {
+                        rowData.push(`"${td.innerText.replace(/[\r\n]+/g, ' ').replace(/"/g, '""')}"`);
+                    }
+                });
+                csv.push(rowData.join(','));
+            });
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = URL.createObjectURL(new Blob([csv.join('\n')], { type: 'text/csv' }));
+            link.click();
+        }
+    </script>
 </body>
+
 </html>
