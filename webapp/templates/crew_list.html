@@ -132,6 +132,14 @@
         .dh-low      { background: #14532d; color: #86efac; }
         .dh-ok       { background: #052e16; color: #4ade80; }
 
+        /* ── DEPARTURE TIME SOURCE HIGHLIGHT ── */
+        /* Crew self-submission */
+        input.dept-sub  { color: #fbbf24 !important; font-weight: 700; background: rgba(251,191,36,0.08) !important; border-radius: 4px; }
+        /* Admin manual entry */
+        input.dept-admin { color: #4ade80 !important; font-weight: 700; background: rgba(74,222,128,0.08) !important; border-radius: 4px; }
+        /* RTIS auto-frozen */
+        input.dept-rtis  { color: #60a5fa !important; font-weight: 700; background: rgba(96,165,250,0.10) !important; border-radius: 4px; }
+
         /* ── SOURCE COLORS ── */
         .src-cms   { border-left: 3px solid #3b82f6 !important; }
         .src-sub   { border-left: 3px solid #f59e0b !important; }
@@ -344,7 +352,15 @@
                     <th data-col="2">Ord Time</th>
                     <th data-col="3">Sign On</th>
                     <th data-col="4" style="text-align:center">CTO Time</th>
-                    <th data-col="5" style="text-align:center">Dept Time</th>
+                    <th data-col="5" style="text-align:center">
+                        Dept Time
+                        <div style="display:flex;justify-content:center;gap:6px;margin-top:3px;font-size:9px;font-weight:400;line-height:1;">
+                            <span style="color:#fbbf24" title="Crew submitted">● Crew</span>
+                            <span style="color:#4ade80" title="Admin entry">● Admin</span>
+                            <span style="color:#60a5fa" title="RTIS auto-frozen">● RTIS</span>
+                        </div>
+                    </th>
+
                     <th data-col="6">PDD</th>
                     <th data-col="7">Duty Hrs</th>
                     <th data-col="8">From</th>
@@ -390,10 +406,10 @@
 
                     <!-- Dept Time (editable time, center) -->
                     <td class="src-{{ src.departure_time }} td-center">
-                        <input type="time" class="dt-input"
+                        <input type="time" class="dt-input {% if crew.is_rtis_departure %}dept-rtis{% elif src.departure_time == 'admin' %}dept-admin{% elif src.departure_time == 'sub' %}dept-sub{% endif %}"
                                data-field="departure_time" data-crew="{{ crew.crew_id }}"
                                data-raw="{{ crew.departure_time if crew.departure_time else '' }}"
-                               title="{{ crew.departure_time if crew.departure_time else 'Not set' }}">
+                               title="Dept: {{ crew.departure_time if crew.departure_time else 'Not set' }}{% if crew.is_rtis_departure %} — RTIS auto-frozen{% elif src.departure_time == 'admin' %} — Admin entry{% elif src.departure_time == 'sub' %} — Crew submitted{% endif %}">
                     </td>
 
                     <!-- PDD -->
@@ -790,7 +806,7 @@ document.querySelectorAll('.ns-checkbox').forEach(cb => {
 /* ================================================================
    AUTO-SAVE + TIMER
    ================================================================ */
-const SAVE_INTERVAL = 5 * 60 * 1000;
+const SAVE_INTERVAL = 10 * 60 * 1000;
 let timeLeft = SAVE_INTERVAL / 1000;
 
 function updateTimer() {

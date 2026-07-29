@@ -286,6 +286,21 @@
             <!-- Charge Handover -->
             <div class="mt-4 border-t border-amber-200 pt-4">
               <label class="block text-sm font-medium text-amber-900 mb-2">Charge Handover ID (Relieving Crew) <span class="text-xs text-amber-600 font-normal">(Optional)</span></label>
+              
+              <!-- Name Search -->
+              <div class="relative mb-3">
+                <input type="text" id="ho_name_search"
+                  class="w-full py-2 px-3 border border-amber-300 rounded-md bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm"
+                  placeholder="Start entering working LPG name" autocomplete="off" oninput="handleHoNameSearch(event)">
+                <div id="ho_name_search_dropdown" class="absolute z-10 w-full bg-white border border-gray-300 shadow-lg max-h-60 rounded-md overflow-y-auto hidden mt-1"></div>
+              </div>
+              
+              <div class="flex items-center my-3">
+                <div class="flex-grow border-t border-amber-300"></div>
+                <span class="mx-3 text-amber-600 text-xs font-medium">OR</span>
+                <div class="flex-grow border-t border-amber-300"></div>
+              </div>
+
               <input type="hidden" name="handover_crew_id" id="handover_crew_id">
               <div class="flex flex-wrap items-stretch gap-2">
                 <select id="ho_lobby"
@@ -591,6 +606,61 @@
       }
     }
 
+    let activeCrews = [];
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const res = await fetch('/api/active_crews');
+        activeCrews = await res.json();
+      } catch(e) {
+        console.error('Failed to fetch active crews', e);
+      }
+    });
+
+    function handleHoNameSearch(e) {
+      const val = e.target.value.toLowerCase();
+      const dropdown = document.getElementById('ho_name_search_dropdown');
+      dropdown.innerHTML = '';
+      if (!val) {
+        dropdown.classList.add('hidden');
+        return;
+      }
+      
+      const matches = activeCrews.filter(c => c.name.toLowerCase().includes(val) || c.crew_id.toLowerCase().includes(val));
+      if (matches.length > 0) {
+        matches.forEach(c => {
+          const div = document.createElement('div');
+          div.className = 'px-4 py-2 hover:bg-amber-100 cursor-pointer text-sm text-gray-800 border-b border-gray-100 last:border-0';
+          div.textContent = `${c.name} (${c.crew_id})`;
+          div.onclick = () => {
+            document.getElementById('handover_crew_id').value = c.crew_id;
+            document.getElementById('ho_name_search').value = `${c.name} (${c.crew_id})`;
+            dropdown.classList.add('hidden');
+            
+            // Trigger lookup automatically to validate and link it
+            const stat = document.getElementById('ho_status');
+            stat.textContent = "✓ Linked to " + c.crew_id;
+            stat.className = "mt-2 text-xs text-green-600 font-medium";
+            
+            // Clear manual lobby/num if any
+            document.getElementById('ho_lobby').value = '';
+            document.getElementById('ho_num').value = '';
+          };
+          dropdown.appendChild(div);
+        });
+        dropdown.classList.remove('hidden');
+      } else {
+        dropdown.classList.add('hidden');
+      }
+    }
+
+    // Hide dropdown on outside click
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#ho_name_search') && !e.target.closest('#ho_name_search_dropdown')) {
+        const dropdown = document.getElementById('ho_name_search_dropdown');
+        if (dropdown) dropdown.classList.add('hidden');
+      }
+    });
+
     async function lookupHandoverCrew() {
       const lobby = document.getElementById('ho_lobby').value;
       const num = document.getElementById('ho_num').value;
@@ -606,6 +676,9 @@
       document.getElementById('handover_crew_id').value = fullId;
       stat.textContent = "Looking up crew...";
       stat.className = "mt-2 text-xs text-amber-700";
+      
+      // Clear Name search if they are typing manually
+      document.getElementById('ho_name_search').value = '';
 
       try {
         const res = await fetch('/api/crew_lookup/' + fullId);

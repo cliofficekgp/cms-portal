@@ -8,6 +8,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
+from google.cloud import vision
 
 # -----------------------------------------------------------------------------
 # Timing & State Helpers
@@ -65,9 +66,63 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 # Configuration
 # -----------------------------------------------------------------------------
 FLASK_API_URL = f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis"
+FLASK_BASE_URL = f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api"
 API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 ACTIVE_TUNNEL = "Unknown"
+
+# -----------------------------------------------------------------------------
+# GCP Vision — same multi-account daily rotation as login.py
+# -----------------------------------------------------------------------------
+def _decode_gcp_b64(env_var_name):
+    """Decode a base64-encoded GCP JSON credential from an env var, handling encoding quirks."""
+    b64_str = os.environ[env_var_name].strip()
+    b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
+    raw_bytes = base64.b64decode(b64_str)
+    if raw_bytes[:3] == b'\xef\xbb\xbf':  raw_bytes = raw_bytes[3:]   # UTF-8 BOM
+    if raw_bytes[:2] in (b'\xff\xfe', b'\xfe\xff'):  # UTF-16 BOM
+        return raw_bytes.decode('utf-16')
+    for enc in ('utf-8', 'utf-8-sig', 'utf-16', 'latin-1'):
+        try:
+            return raw_bytes.decode(enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return raw_bytes.decode('utf-8', errors='replace')
+
+GCP_CREDENTIALS = []
+for i in range(1, 11):
+    env_var = f'GCP_CREDENTIALS_B64_{i}'
+    if env_var in os.environ:
+        creds_json = _decode_gcp_b64(env_var)
+        creds_path = os.path.join(DATA_DIR, f'gcp_creds_{i}.json')
+        with open(creds_path, 'w', encoding='utf-8') as f:
+            f.write(creds_json)
+        try: account_name = json.loads(creds_json).get('project_id', f'account_{i}')
+        except: account_name = f'account_{i}'
+        GCP_CREDENTIALS.append({'path': creds_path, 'name': account_name})
+
+if not GCP_CREDENTIALS:
+    if 'GCP_CREDENTIALS_B64' in os.environ:
+        creds_json = _decode_gcp_b64('GCP_CREDENTIALS_B64')
+        creds_path = os.path.join(DATA_DIR, 'gcp_creds.json')
+        with open(creds_path, 'w', encoding='utf-8') as f:
+            f.write(creds_json)
+        try: account_name = json.loads(creds_json).get('project_id', 'legacy_account')
+        except: account_name = 'legacy_account'
+        GCP_CREDENTIALS.append({'path': creds_path, 'name': account_name})
+    else:
+        coolify_creds_path = os.path.join(BASE_DIR, 'scraper', 'gcp-creds.json')
+        if os.path.exists(coolify_creds_path):
+            try:
+                with open(coolify_creds_path) as f: account_name = json.load(f).get('project_id', 'coolify_account')
+            except: account_name = 'coolify_account'
+            GCP_CREDENTIALS.append({'path': coolify_creds_path, 'name': account_name})
+        else:
+            default_path = os.path.join(BASE_DIR, 'scraper', 'algebraic-cycle-432817-r8-ae9fa17cac37.json')
+            try:
+                with open(default_path) as f: account_name = json.load(f).get('project_id', 'default_account')
+            except: account_name = 'default_account'
+            GCP_CREDENTIALS.append({'path': default_path, 'name': account_name})
 
 # -----------------------------------------------------------------------------
 # Network / Proxy
@@ -156,10 +211,32 @@ def main_loop():
     
     consecutive_captcha_failures = 0
     consecutive_auth_failures = 0
+
+    # GCP Vision — daily rotation, same as login.py
+    active_vision_client = None
+    active_vision_account = None
+    last_vision_rotation_date = None
     
     while True:
         if check_stop_signal():
             sys.exit(0)
+
+        # Rotate GCP Vision account daily
+        current_date = datetime.datetime.now(IST).date()
+        if GCP_CREDENTIALS and last_vision_rotation_date != current_date:
+            active_index = current_date.toordinal() % len(GCP_CREDENTIALS)
+            active_cred = GCP_CREDENTIALS[active_index]
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = active_cred['path']
+            try:
+                active_vision_client = vision.ImageAnnotatorClient()
+                active_vision_account = active_cred['name']
+                print(f"[RTIS-{current_date}] Switched to OCR account: {active_vision_account}")
+            except Exception as e:
+                print(f"[RTIS] Failed to initialise Vision client ({active_cred['name']}): {e}. Continuing without Vision tier.")
+                active_vision_client = None
+                active_vision_account = None
+            last_vision_rotation_date = current_date
+
             
         proxy_host, proxy_port = get_active_proxy()
         
@@ -227,25 +304,62 @@ def main_loop():
             elif "shedHome" in driver.current_url:
                 pass # Already logged in (rare)
             else:
-                # Solve captcha
+                # Solve captcha — same 3-tier cascade as login.py:
+                # Tier 1: ddddocr (attempts 1-5)
+                # Tier 2: Google Cloud Vision (attempts 6-10)
+                # Tier 3: Manual admin solve (>10 consecutive failures)
                 captcha_img = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "captcha")))
                 img_base64 = captcha_img.screenshot_as_base64
-                
-                # We attempt to solve using ddddocr
+                img_bytes = base64.b64decode(img_base64)
+
                 result = ''
-                try:
-                    img_bytes = base64.b64decode(img_base64)
-                    res = ocr.classification(img_bytes)
-                    if res: result = res.replace(' ', '')
-                except:
-                    pass
-                    
-                if not result:
-                    send_state_to_admin('waiting_for_captcha', 'OCR failed. Please solve captcha manually.', True, 'captcha', image_base64=img_base64)
+                if consecutive_captcha_failures >= 10:
+                    # Tier 3: Manual admin solve
+                    send_state_to_admin('waiting_for_captcha', f'RTIS Captcha failed {consecutive_captcha_failures} times. Please solve manually.', True, 'captcha', image_base64=img_base64)
                     result = wait_for_admin_input(180)
                     if not result:
                         driver.quit()
+                        consecutive_captcha_failures += 1
                         continue
+                    consecutive_captcha_failures = 0  # reset on manual solve
+                else:
+                    if consecutive_captcha_failures < 5:
+                        # Tier 1: ddddocr
+                        send_state_to_admin('running', f'Solving RTIS Captcha via ddddocr (Attempt {consecutive_captcha_failures + 1}/5)...')
+                        try:
+                            res = ocr.classification(img_bytes)
+                            if res: result = res.replace(' ', '')
+                        except Exception as e:
+                            print(f"[RTIS] ddddocr failed: {e}")
+
+                    if not result and active_vision_client:
+                        # Tier 2: Google Cloud Vision
+                        if consecutive_captcha_failures == 5:
+                            failure_time = datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+                            send_state_to_admin('running', f'RTIS ddddocr failed 5 times, falling back to Google Vision...', last_ddddocr_failure=failure_time)
+                        else:
+                            send_state_to_admin('running', f'Solving RTIS Captcha via Vision ({active_vision_account})...')
+                        try:
+                            image_v = vision.Image(content=img_bytes)
+                            response = active_vision_client.text_detection(image=image_v)
+                            # Report OCR usage to backend
+                            try:
+                                requests.post(f"{FLASK_BASE_URL}/ocr_usage", json={'account_name': active_vision_account}, headers={'X-API-Secret': API_SECRET}, timeout=5)
+                            except Exception as e:
+                                print(f"[RTIS] Failed to report OCR usage: {e}")
+                            texts = response.text_annotations
+                            if texts and texts[0].description:
+                                for char in texts[0].description:
+                                    if char != ' ':
+                                        result += char
+                                        if len(result) == 5: break
+                            result = result.lower()
+                        except Exception as e:
+                            print(f"[RTIS] Google Vision failed: {e}")
+
+                    if not result:
+                        # No tier succeeded — fall through; wrong result will trigger captcha failure below
+                        send_state_to_admin('running', 'RTIS Captcha: all OCR tiers failed, submitting blank (will retry).')
                         
                 send_state_to_admin('running', f'Submitting login (Captcha solved)...')
                 user_field = driver.find_element(By.ID, "username")
@@ -429,7 +543,7 @@ def main_loop():
                                         prev_lat, prev_lon = prev_row
                                         if prev_lat is not None and prev_lon is not None:
                                             dist = haversine_distance(prev_lat, prev_lon, lat, lon)
-                                            if dist > 100:
+                                            if dist > 0.1: # 0.1 km = 100 meters
                                                 moved_gt_100m = True
                                             
                                     crew_id = loco_mapping.get(loco)

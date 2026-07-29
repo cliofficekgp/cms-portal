@@ -45,8 +45,9 @@ DB_WRITE_LOCK = threading.Lock()
 
 def parse_dt(val):
     if not val or val == '-': return None
-    val = val.strip()
-    for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M', '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
+    val = val.strip().replace(' IST', '')
+    for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M', '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
+                '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%y %H:%M:%S', '%d/%m/%y %H:%M', '%d/%m/%Y', '%d/%m/%y']:
         try:
             dt = datetime.strptime(val, fmt)
             return dt.replace(tzinfo=IST)
@@ -2010,104 +2011,112 @@ def _get_crew_list_data(conn):
         row['_src'] = src
 
         # --- Dynamically override current_location with latest RTIS location for multi-locos ---
+        run_rtis_check = True
         # Skip RTIS check entirely if crew has marked relief
         if row.get('is_relief') == 1:
-            continue
+            run_rtis_check = False
             
         # Skip RTIS check if loco_no came strictly from CMS
         if row.get('_src', {}).get('loco_no') == 'cms':
-            continue
+            run_rtis_check = False
             
-        loco_no_str = row.get('loco_no')
-        if loco_no_str:
-            locos = [l.strip() for l in loco_no_str.split(',') if l.strip()]
-            latest_time = None
-            latest_loc = None
-            for loco in locos:
-                if loco in rtis_locations:
-                    loc_data = rtis_locations[loco]
-                    # Parse time string: %d/%m/%y %H:%M:%S IST
-                    time_str = loc_data['time'].replace(' IST', '')
-                    try:
-                        dt = datetime.strptime(time_str, '%d/%m/%y %H:%M:%S').replace(tzinfo=IST)
-                        if latest_time is None or dt > latest_time:
-                            latest_time = dt
-                            latest_loc = loc_data
-                    except Exception as e:
-                        print(f"Error parsing RTIS time {time_str}: {e}")
-            
-            if latest_loc:
-                loc_str = latest_loc.get('loc')
-                # Fallback to nearest station if loc is empty but lat/lon are present
-                if not loc_str and latest_loc.get('lat') and latest_loc.get('lon'):
-                    loc_str = get_nearest_station(float(latest_loc['lat']), float(latest_loc['lon']))
+        if run_rtis_check:
+            loco_no_str = row.get('loco_no')
+            if loco_no_str:
+                locos = [l.strip() for l in loco_no_str.split(',') if l.strip()]
+                latest_time = None
+                latest_loc = None
+                for loco in locos:
+                    if loco in rtis_locations:
+                        loc_data = rtis_locations[loco]
+                        # Parse time string: %d/%m/%y %H:%M:%S IST
+                        time_str = loc_data['time'].replace(' IST', '')
+                        try:
+                            dt = datetime.strptime(time_str, '%d/%m/%y %H:%M:%S').replace(tzinfo=IST)
+                            if latest_time is None or dt > latest_time:
+                                latest_time = dt
+                                latest_loc = loc_data
+                        except Exception as e:
+                            print(f"Error parsing RTIS time {time_str}: {e}")
                 
-                if loc_str:
-                    # Expose latest loco data for the template so we don't show multiple locos
-                    row['_latest_rtis_loco'] = {
-                        'loc': loc_str,
-                        'time': latest_loc['time'],
-                        'lat': latest_loc.get('lat', ''),
-                        'lon': latest_loc.get('lon', '')
-                    }
+                if latest_loc:
+                    loc_str = latest_loc.get('loc')
+                    # Fallback to nearest station if loc is empty but lat/lon are present
+                    if not loc_str and latest_loc.get('lat') and latest_loc.get('lon'):
+                        loc_str = get_nearest_station(float(latest_loc['lat']), float(latest_loc['lon']))
                     
-                    # Compare with manual location update time
-                    manual_time = row.get('_loc_time_dt')
-                    if not manual_time or (latest_time and latest_time >= manual_time):
-                        row['current_location'] = loc_str
-                        row['is_rtis_location'] = True
-                        row['_loc_update_time'] = latest_time.strftime('%H:%M') if latest_time else latest_loc['time']
+                    if loc_str:
+                        # Expose latest loco data for the template so we don't show multiple locos
+                        row['_latest_rtis_loco'] = {
+                            'loc': loc_str,
+                            'time': latest_loc['time'],
+                            'lat': latest_loc.get('lat', ''),
+                            'lon': latest_loc.get('lon', '')
+                        }
                         
-                        # Auto-freeze PDD if RTIS time is after CTO time
-                        cto_time_str = row.get('cto_time')
-                        if cto_time_str and cto_time_str not in ['-', '–']:
-                            cto_dt = parse_dt(cto_time_str)
-                            # Only if the train has departed (location is not the starting station)
-                            # Actually, latest_time > cto_dt means the train has physically updated its location after CTO
-                            if cto_dt and latest_time and latest_time > cto_dt:
-                                # We freeze it by setting departure_time to the RTIS time
-                                # only if departure_time is not already set by manual intervention
-                                if not row.get('departure_time') or row['departure_time'] in ['-', '–']:
-                                    new_dep = latest_time.strftime('%d/%m/%y %H:%M')
-                                    row['departure_time'] = new_dep
-                                    _del_loc_admin.append(row['crew_id'])
-                                    _null_loc_sub.append(row['crew_id'])
-                                    updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-                                    with DB_WRITE_LOCK:
-                                        conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], new_dep, updated_at_freeze))
-                                        conn.commit()
+                        # Compare with manual location update time
+                        manual_time = row.get('_loc_time_dt')
+                        if not manual_time or (latest_time and latest_time >= manual_time):
+                            row['current_location'] = loc_str
+                            row['is_rtis_location'] = True
+                            row['_loc_update_time'] = latest_time.strftime('%H:%M') if latest_time else latest_loc['time']
+                            
+                            # Auto-freeze PDD if RTIS time is after CTO time
+                            cto_time_str = row.get('cto_time')
+                            if cto_time_str and cto_time_str not in ['-', '–']:
+                                cto_dt = parse_dt(cto_time_str)
+                                # Only if the train has departed (location is not the starting station)
+                                # Actually, latest_time > cto_dt means the train has physically updated its location after CTO
+                                if cto_dt and latest_time and latest_time > cto_dt:
+                                    # We freeze it by setting departure_time to the RTIS time
+                                    # only if departure_time is not already set by manual intervention
+                                    if not row.get('departure_time') or row['departure_time'] in ['-', '–']:
+                                        new_dep = latest_time.strftime('%d/%m/%y %H:%M')
+                                        row['departure_time'] = new_dep
+                                        row['is_rtis_departure'] = True
+                                        _del_loc_admin.append(row['crew_id'])
+                                        _null_loc_sub.append(row['crew_id'])
+                                        updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+                                        with DB_WRITE_LOCK:
+                                            conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], new_dep, updated_at_freeze))
+                                            conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'is_rtis_departure', '1', ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], updated_at_freeze))
+                                            conn.commit()
 
+
+        # Read 'is_rtis_departure' from admin_edits if present
+        if crew_admin_edits.get('is_rtis_departure') == '1':
+            row['is_rtis_departure'] = True
 
         # Calculate PDD dynamically based on current state
-            lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
-            from_sttn = (row.get('from_sttn', '') or '').upper().strip()
-            cto_sttn = (row.get('current_location', '') or '').upper().strip()
-            
-            nmp_cluster = {'NMP', 'NPTY', 'NKKH', 'NMMS', 'NMPY', 'NPDY', 'NPRY'}
-            from_sttn_norm = 'NMP' if from_sttn in nmp_cluster else from_sttn
-            cto_sttn_norm = 'NMP' if cto_sttn in nmp_cluster else cto_sttn
+        lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
+        from_sttn = (row.get('from_sttn', '') or '').upper().strip()
+        cto_sttn = (row.get('current_location', '') or '').upper().strip()
+        
+        nmp_cluster = {'NMP', 'NPTY', 'NKKH', 'NMMS', 'NMPY', 'NPDY', 'NPRY'}
+        from_sttn_norm = 'NMP' if from_sttn in nmp_cluster else from_sttn
+        cto_sttn_norm = 'NMP' if cto_sttn in nmp_cluster else cto_sttn
 
-            is_pdd_sttn = False
-            if sign_on_dt:
-                # If they have departed from any tracked station, they have a PDD.
-                if parse_dt(row.get('departure_time')) and (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}):
-                    is_pdd_sttn = True
-                # Otherwise, if they haven't departed yet, check if they are physically at the lobby
-                elif from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
-                    is_pdd_sttn = True
-                elif (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}) and from_sttn_norm == cto_sttn_norm:
-                    is_pdd_sttn = True
+        is_pdd_sttn = False
+        if sign_on_dt:
+            # If they have departed from any tracked station, they have a PDD.
+            if parse_dt(row.get('departure_time')) and (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}):
+                is_pdd_sttn = True
+            # Otherwise, if they haven't departed yet, check if they are physically at the lobby
+            elif from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
+                is_pdd_sttn = True
+            elif (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}) and from_sttn_norm == cto_sttn_norm:
+                is_pdd_sttn = True
 
-            if is_pdd_sttn:
-                departure_dt = parse_dt(row.get('departure_time'))
-                end_time = departure_dt if departure_dt else now
-                pdd_delta = end_time - sign_on_dt
-                if pdd_delta.total_seconds() > 0:
-                    p_hours = int(pdd_delta.total_seconds() // 3600)
-                    p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
-                    row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
-            else:
-                row['pdd'] = '-'
+        if is_pdd_sttn:
+            departure_dt = parse_dt(row.get('departure_time'))
+            end_time = departure_dt if departure_dt else now
+            pdd_delta = end_time - sign_on_dt
+            if pdd_delta.total_seconds() > 0:
+                p_hours = int(pdd_delta.total_seconds() // 3600)
+                p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
+                row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
+        else:
+            row['pdd'] = '-'
 
         # Auto-remove location based on departure time (deferred)
         if row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
@@ -2248,7 +2257,7 @@ def _get_crew_list_data(conn):
         conn.close()
 
     def list_sort_key(r):
-        return (r['_duty_minutes'], r['_cto_dt'])
+        return (r.get('_duty_minutes', 0), r.get('_cto_dt', datetime.min.replace(tzinfo=IST)))
 
     data.sort(key=list_sort_key, reverse=True)
 
@@ -2318,6 +2327,9 @@ def api_admin_edit():
     if field == 'current_location':
         if value != '':
             conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'frozen_pdd'", (crew_id,))
+
+    if field == 'departure_time':
+        conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'is_rtis_departure'", (crew_id,))
 
     if field in ('cto_time', 'departure_time', 'relief_datetime') and value and value not in ['-', '–']:
         # Construct full datetime from sign_on_time + submitted time
@@ -2478,6 +2490,17 @@ def api_crew_lookup(crew_id):
         })
     else:
         return jsonify({'status': 'not_found'})
+
+@app.route('/api/active_crews', methods=['GET'])
+def api_active_crews():
+    try:
+        conn = get_db()
+        rows = conn.execute("SELECT crew_id, name, desig FROM crew_records WHERE is_active = 1").fetchall()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        print(f"Error fetching active crews: {e}")
+        return jsonify([])
 
 @app.route('/api/stations', methods=['GET'])
 def api_stations():

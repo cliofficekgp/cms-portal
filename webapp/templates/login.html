@@ -43,6 +43,22 @@
       </div>
       {% endif %}
 
+      <!-- Name Search Section -->
+      <div class="relative">
+        <label class="block text-sm font-medium text-gray-300 mb-2">Working LPG Name</label>
+        <input type="text" id="name_search"
+          class="w-full py-3 px-3 border border-gray-600 rounded-lg bg-gray-800/50 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
+          placeholder="Start entering working LPG name" autocomplete="off" oninput="handleNameSearch(event)">
+        <div id="name_search_dropdown" class="absolute z-10 w-full bg-gray-800 border border-gray-600 shadow-lg max-h-60 rounded-md overflow-y-auto hidden mt-1"></div>
+      </div>
+
+      <!-- OR Divider -->
+      <div class="flex items-center my-4">
+        <div class="flex-grow border-t border-gray-600"></div>
+        <span class="mx-4 text-gray-400 text-sm font-semibold">OR</span>
+        <div class="flex-grow border-t border-gray-600"></div>
+      </div>
+
       <div>
         <label class="block text-sm font-medium text-gray-300 mb-2">Loco Pilot ID</label>
         <!-- Hidden combined crew_id submitted to server -->
@@ -83,7 +99,7 @@
           <!-- 4-digit number -->
           <input type="text" id="crew_number"
             class="flex-1 py-3 px-3 border border-gray-600 rounded-lg bg-gray-800/50 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm font-mono tracking-widest"
-            placeholder="0000" maxlength="4" inputmode="numeric" autocomplete="off" required
+            placeholder="0000" maxlength="4" inputmode="numeric" autocomplete="off"
             oninput="this.value=this.value.replace(/\D/g,'').slice(0,4); buildCrewId()">
         </div>
 
@@ -92,6 +108,53 @@
       </div>
 
       <script>
+        let activeCrews = [];
+        document.addEventListener('DOMContentLoaded', async () => {
+          try {
+            const res = await fetch('/api/active_crews');
+            activeCrews = await res.json();
+          } catch(e) {
+            console.error('Failed to fetch active crews', e);
+          }
+        });
+
+        function handleNameSearch(e) {
+          const val = e.target.value.toLowerCase();
+          const dropdown = document.getElementById('name_search_dropdown');
+          dropdown.innerHTML = '';
+          if (!val) {
+            dropdown.classList.add('hidden');
+            return;
+          }
+          
+          const matches = activeCrews.filter(c => c.name.toLowerCase().includes(val) || c.crew_id.toLowerCase().includes(val));
+          if (matches.length > 0) {
+            matches.forEach(c => {
+              const div = document.createElement('div');
+              div.className = 'px-4 py-3 hover:bg-gray-700 cursor-pointer text-sm text-white border-b border-gray-700 last:border-0';
+              div.textContent = `${c.name} (${c.crew_id})`;
+              div.onclick = () => {
+                document.getElementById('crew_id').value = c.crew_id;
+                document.getElementById('name_search').value = `${c.name} (${c.crew_id})`;
+                dropdown.classList.add('hidden');
+                document.forms[0].submit(); // Auto submit
+              };
+              dropdown.appendChild(div);
+            });
+            dropdown.classList.remove('hidden');
+          } else {
+            dropdown.classList.add('hidden');
+          }
+        }
+
+        // Hide dropdown on outside click
+        document.addEventListener('click', (e) => {
+          if (!e.target.closest('#name_search') && !e.target.closest('#name_search_dropdown')) {
+            const dropdown = document.getElementById('name_search_dropdown');
+            if (dropdown) dropdown.classList.add('hidden');
+          }
+        });
+
         function handleLobbyChange() {
           const sel = document.getElementById('lobby_select');
           const otherBox = document.getElementById('lobby_other');
@@ -119,8 +182,13 @@
             const fullId = lobby + num;
             hiddenInput.value = fullId;
             preview.textContent = 'Crew ID: ' + fullId;
+            // Clear Name search if they are typing manually
+            document.getElementById('name_search').value = '';
           } else {
-            hiddenInput.value = '';
+            // Only clear hiddenInput if Name Search is also empty
+            if (!document.getElementById('name_search').value) {
+              hiddenInput.value = '';
+            }
             preview.textContent = '\u00a0';
           }
         }
@@ -135,14 +203,19 @@
         </svg>
       </button>
       <!-- Validation Error (JS) -->
-      <p id="crew_id_error" class="text-red-400 text-xs text-center hidden">Please select a Lobby and enter a 4-digit
-        number.</p>
+      <p id="crew_id_error" class="text-red-400 text-xs text-center hidden">Please search by Name OR select Lobby and enter 4-digit number.</p>
 
       <script>
         // Prevent submit if crew_id is not fully built
         function validateCrewId() {
           const val = document.getElementById('crew_id').value;
           const err = document.getElementById('crew_id_error');
+          
+          if (document.getElementById('name_search').value && val) {
+            err.classList.add('hidden');
+            return true;
+          }
+
           const sel = document.getElementById('lobby_select');
           const num = document.getElementById('crew_number').value;
           const other = document.getElementById('lobby_other').value;
@@ -159,7 +232,7 @@
     </form>
 
     <p class="mt-8 text-center text-xs text-gray-400 leading-relaxed">
-      Select Lobby → Enter 4-digit number → Continue
+      Search by Name OR Select Lobby → Enter 4-digit number
     </p>
   </div>
 

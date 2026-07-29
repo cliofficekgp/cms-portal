@@ -754,8 +754,11 @@ def main_loop():
                 otp_val = None
                 OTP_FILE = os.path.join(DATA_DIR, 'otp.txt')
                 if os.path.exists(OTP_FILE):
-                    with open(OTP_FILE, 'r') as f:
-                        otp_val = f.read().strip()
+                    # Only reuse the saved OTP if it was written today (same pattern as rtis_otp.txt)
+                    mtime = os.path.getmtime(OTP_FILE)
+                    if datetime.datetime.fromtimestamp(mtime).date() == datetime.datetime.now(IST).date():
+                        with open(OTP_FILE, 'r') as f:
+                            otp_val = f.read().strip()
                         
                 if not otp_val:
                     # OTP Flow
