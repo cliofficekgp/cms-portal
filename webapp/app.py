@@ -1664,7 +1664,7 @@ def get_active_locos():
         query = '''
         SELECT 
             r.crew_id,
-            COALESCE(a_loco.value, s.loco_no) AS loco_no,
+            COALESCE(a_loco.value, s.loco_no, r.loco_no) AS loco_no,
             COALESCE(a_relief.value, s.is_relief, 0) AS is_relief,
             s.handover_crew_id,
             s.relief_datetime
@@ -1679,8 +1679,8 @@ def get_active_locos():
         LEFT JOIN (
             SELECT crew_id, value FROM admin_edits WHERE field = 'is_relief'
         ) a_relief ON r.crew_id = a_relief.crew_id
-        WHERE r.is_active = 1 
-          AND (s.loco_no IS NOT NULL OR a_loco.value IS NOT NULL)
+        WHERE r.is_active = 1
+          AND COALESCE(a_loco.value, s.loco_no, r.loco_no) IS NOT NULL
         '''
         rows = conn.execute(query).fetchall()
         
@@ -1738,37 +1738,52 @@ def sync_loco_location():
     conn = get_db()
     now_str = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     
-    # Check if exists
-    existing = conn.execute('SELECT crew_id, latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
-    
-    if existing:
-        # Only update updated_at if location has physically changed (dist > 100m) or name changed
-        # ALSO update if the crew_id changed (new crew took over the loco!)
-        crew_changed = (existing['crew_id'] != crew_id)
-        loc_changed = moved or (existing['location_name'] != loc_name) or crew_changed
-        new_updated_at = now_str if loc_changed else existing['updated_at']
-        
-        conn.execute('''
-            UPDATE loco_locations 
-            SET crew_id = ?, prev_latitude = ?, prev_longitude = ?, 
-                latitude = ?, longitude = ?, location_name = ?, 
-                same_as_previous = ?, updated_at = ?
-            WHERE loco_no = ?
-        ''', (crew_id, existing['latitude'], existing['longitude'], lat, lon, loc_name, 0 if loc_changed else 1, new_updated_at, loco_no))
-    else:
-        conn.execute('''
-            INSERT INTO loco_locations (loco_no, crew_id, latitude, longitude, location_name, prev_latitude, prev_longitude, same_as_previous, updated_at, created_at)
-            VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, ?, ?)
-        ''', (loco_no, crew_id, lat, lon, loc_name, now_str, now_str))
-        
-    if moved and crew_id:
-        # Update departure time (departure_time) in crew_submissions
-        try:
-            conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", (now_str, crew_id))
-        except Exception as e:
-            print(f"Error updating departure_time: {e}")
+    try:
+        with DB_WRITE_LOCK:
+            # Check if exists
+            existing = conn.execute('SELECT crew_id, latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
             
-    conn.commit()
+            if existing:
+                # Update updated_at if: moved >100m, ANY lat/lon change, station name changed, or crew changed
+                crew_changed = (existing['crew_id'] != crew_id)
+                lat_lon_changed = (round(existing['latitude'] or 0, 5) != round(lat or 0, 5) or
+                                   round(existing['longitude'] or 0, 5) != round(lon or 0, 5))
+                name_changed = (existing['location_name'] != loc_name)
+                loc_changed = moved or lat_lon_changed or name_changed or crew_changed
+                new_updated_at = now_str if loc_changed else existing['updated_at']
+                
+                conn.execute('''
+                    UPDATE loco_locations 
+                    SET crew_id = ?, prev_latitude = ?, prev_longitude = ?, 
+                        latitude = ?, longitude = ?, location_name = ?, 
+                        same_as_previous = ?, updated_at = ?
+                    WHERE loco_no = ?
+                ''', (crew_id, existing['latitude'], existing['longitude'], lat, lon, loc_name,
+                      0 if loc_changed else 1, new_updated_at, loco_no))
+                
+                if loc_changed:
+                    print(f"[RTIS] Loco {loco_no} ({crew_id}): {existing['location_name']} → {loc_name} "
+                          f"| moved={moved} lat_lon_changed={lat_lon_changed} "
+                          f"| updated_at={new_updated_at}")
+            else:
+                conn.execute('''
+                    INSERT INTO loco_locations (loco_no, crew_id, latitude, longitude, location_name, prev_latitude, prev_longitude, same_as_previous, updated_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, ?, ?)
+                ''', (loco_no, crew_id, lat, lon, loc_name, now_str, now_str))
+                print(f"[RTIS] Loco {loco_no} ({crew_id}): NEW entry at {loc_name} | {now_str}")
+                
+            if moved and crew_id:
+                try:
+                    conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", (now_str, crew_id))
+                except Exception as e:
+                    print(f"Error updating departure_time: {e}")
+                    
+            conn.commit()
+    except Exception as e:
+        print(f"[RTIS] sync_loco ERROR for {loco_no}: {e}")
+        conn.close()
+        return jsonify({'error': str(e)}), 500
+        
     conn.close()
     return jsonify({'success': True})
 

@@ -570,8 +570,26 @@ def main_loop():
                                         "location_name": stn,
                                         "moved_gt_100m": moved_gt_100m
                                     }
-                                    requests.post(f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/sync_loco", 
-                                                json=sync_payload, headers={'X-API-Secret': API_SECRET})
+                                    try:
+                                        sync_resp = requests.post(
+                                            f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/sync_loco",
+                                            json=sync_payload,
+                                            headers={'X-API-Secret': API_SECRET},
+                                            timeout=10
+                                        )
+                                        if sync_resp.status_code != 200:
+                                            print(f"[RTIS] sync_loco failed for {loco}: HTTP {sync_resp.status_code} - {sync_resp.text[:200]}")
+                                        else:
+                                            print(f"[RTIS] Synced loco {loco} ({crew_id}): {stn} moved={moved_gt_100m}")
+                                    except Exception as sync_err:
+                                        print(f"[RTIS] sync_loco POST error for {loco}: {sync_err}")
+                            else:
+                                if resp.status_code == 200:
+                                    data = resp.json()
+                                    live_data = data.get('locoLiveData')
+                                    print(f"[RTIS] Loco {loco}: no valid lat/lon - locoLiveData={live_data}")
+                                else:
+                                    print(f"[RTIS] Loco {loco}: HTTP {resp.status_code}")
                         except Exception as e:
                             print(f"[RTIS] Error querying loco {loco}: {e}")
                         
