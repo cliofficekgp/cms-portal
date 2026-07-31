@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>KGP Division - Crew On Duty (Live)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+        body{font-family:'Inter',sans-serif;background:#0f172a;min-height:100vh;color:#e2e8f0;font-size:13px;}
+        .page-wrapper{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+        /* HEADER */
+        .header{background:linear-gradient(135deg,#0f2a6b 0%,#1e3a8a 50%,#1d4ed8 100%);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,.45);border-bottom:1px solid rgba(255,255,255,.1);}
+        .header-left{display:flex;flex-direction:column;gap:2px;}
+        .header-title{font-size:15px;font-weight:800;color:#fff;display:flex;align-items:center;gap:8px;}
+        .header-subtitle{font-size:10px;color:#93c5fd;letter-spacing:.04em;}
+        .header-center{display:flex;align-items:center;flex:1;max-width:320px;margin:0 auto;}
+        .search-wrap{position:relative;width:100%;}
+        .search-icon{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:#93c5fd;pointer-events:none;}
+        .search-input{width:100%;padding:6px 8px 6px 28px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;font-size:12px;font-family:inherit;outline:none;}
+        .search-input::placeholder{color:#93c5fd;}
+        .search-input:focus{background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.4);}
+        .header-right{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+        .view-badge{font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;background:rgba(34,197,94,.2);color:#86efac;border:1px solid rgba(34,197,94,.35);letter-spacing:.06em;}
+        .live-clock{font-size:12px;font-weight:600;color:#bfdbfe;background:rgba(255,255,255,.08);padding:4px 10px;border-radius:8px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+        .auto-refresh-badge{font-size:10px;color:#60a5fa;background:rgba(96,165,250,.1);padding:4px 9px;border-radius:6px;white-space:nowrap;}
+        /* STATS */
+        .stats-bar{background:#1e293b;padding:5px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;flex-shrink:0;flex-wrap:wrap;gap:8px;}
+        .stats-group{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+        .stat-item{display:flex;align-items:center;gap:5px;font-size:11px;}
+        .stat-label{color:#64748b;font-weight:600;letter-spacing:.04em;}
+        .stat-val{color:#e2e8f0;font-size:13px;font-weight:700;}
+        .stat-val.red{color:#f87171;} .stat-val.amber{color:#fca5a5;}
+        .legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+        .legend-item{display:flex;align-items:center;gap:4px;font-size:10px;color:#94a3b8;}
+        .legend-dot{width:9px;height:9px;border-radius:2px;flex-shrink:0;}
+        .dot-cms{background:#3b82f6;} .dot-sub{background:#f59e0b;} .dot-admin{background:#22c55e;}
+        /* LOBBY */
+        .lobby-bar{background:#162032;padding:5px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;border-bottom:1px solid #253350;flex-wrap:wrap;}
+        .lobby-bar-label{font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;white-space:nowrap;}
+        .lobby-chip{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;cursor:pointer;user-select:none;border:1.5px solid #334155;color:#94a3b8;background:transparent;transition:all .18s;white-space:nowrap;}
+        .lobby-chip:hover{border-color:#60a5fa;color:#e2e8f0;}
+        .lobby-chip.active{border-color:#3b82f6;background:rgba(59,130,246,.18);color:#93c5fd;}
+        .lobby-chip-all.active{border-color:#22c55e;background:rgba(34,197,94,.15);color:#86efac;}
+        .lobby-chip-kgp.active{border-color:#818cf8;background:rgba(129,140,248,.18);color:#c7d2fe;}
+        .lobby-chip-nmp.active{border-color:#fb923c;background:rgba(251,146,60,.18);color:#fed7aa;}
+        .lobby-chip-bls.active{border-color:#2dd4bf;background:rgba(45,212,191,.18);color:#99f6e4;}
+        .lobby-chip-gts.active{border-color:#f472b6;background:rgba(244,114,182,.18);color:#fbcfe8;}
+        .lobby-chip-adl.active{border-color:#a3e635;background:rgba(163,230,53,.18);color:#d9f99d;}
+        .lobby-chip-src.active{border-color:#fbbf24;background:rgba(251,191,36,.18);color:#fde68a;}
+        .lobby-chip-tpkr.active{border-color:#f87171;background:rgba(248,113,113,.18);color:#fecaca;}
+        /* TABLE */
+        .table-wrap{overflow:auto;flex:1;}
+        table{width:100%;border-collapse:collapse;}
+        thead{position:sticky;top:0;z-index:20;}
+        thead tr{background:#1e293b;}
+        th{padding:6px 5px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;white-space:nowrap;border-bottom:2px solid #334155;cursor:pointer;user-select:none;}
+        th:hover{color:#e2e8f0;background:#263347;}
+        th.sorted-asc::after{content:" ▲";font-size:8px;color:#60a5fa;}
+        th.sorted-desc::after{content:" ▼";font-size:8px;color:#60a5fa;}
+        tbody tr{border-bottom:1px solid #334155;transition:background .12s;}
+        tbody tr:hover{background:rgba(30,58,138,.22) !important;}
+        tbody tr.row-miss{background:rgba(239,68,68,.11) !important;}
+        tbody tr.row-relief{background:rgba(245,158,11,.09) !important;}
+        td{padding:4px 5px;color:#cbd5e1;white-space:nowrap;vertical-align:middle;}
+        td.crew-id-cell{font-weight:700;color:#e2e8f0;}
+        td.name-cell{max-width:130px;overflow:hidden;text-overflow:ellipsis;}
+        .td-center{text-align:center;}
+        /* DUTY */
+        .duty-cell{font-weight:700;border-radius:4px;padding:2px 6px;text-align:center;font-size:12px;min-width:52px;display:inline-block;}
+        .dh-critical{background:#7f1d1d;color:#fca5a5;}
+        .dh-high{background:#92400e;color:#fcd34d;}
+        .dh-mid{background:#713f12;color:#fde68a;}
+        .dh-low{background:#14532d;color:#86efac;}
+        .dh-ok{background:#052e16;color:#4ade80;}
+        /* SOURCE */
+        .src-cms{border-left:3px solid #3b82f6 !important;}
+        .src-sub{border-left:3px solid #f59e0b !important;}
+        .src-admin{border-left:3px solid #22c55e !important;background:rgba(34,197,94,.06) !important;}
+        /* DEPT COLOR */
+        .dept-rtis{color:#60a5fa;font-weight:700;}
+        .dept-admin{color:#4ade80;font-weight:700;}
+        .dept-sub{color:#fbbf24;font-weight:700;}
+        .dept-none{color:#475569;}
+        /* RTIS HINT */
+        .rtis-hint{font-size:9px;color:#60a5fa;margin-top:2px;line-height:1.1;display:flex;align-items:center;justify-content:center;gap:2px;}
+        /* LOCATION */
+        .loc-text{font-weight:600;}
+        .loc-rtis{color:#60a5fa !important;}
+        .loc-time{font-size:10px;color:#94a3b8;margin-top:1px;}
+        /* RELIEF */
+        .relief-badge{display:inline-flex;flex-direction:column;align-items:center;gap:1px;}
+        .relief-station{color:#f59e0b;font-weight:700;}
+        .relief-time{font-size:10px;color:#94a3b8;}
+        .pdd-val{color:#f87171;font-weight:700;}
+        .empty-row td{text-align:center;color:#475569;padding:40px;}
+        ::-webkit-scrollbar{width:5px;height:5px;}
+        ::-webkit-scrollbar-track{background:#0f172a;}
+        ::-webkit-scrollbar-thumb{background:#334155;border-radius:3px;}
+        ::-webkit-scrollbar-thumb:hover{background:#475569;}
+        .readonly-banner{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,.88);border:1px solid #334155;border-radius:20px;padding:4px 16px;font-size:10px;color:#475569;pointer-events:none;z-index:9999;white-space:nowrap;}
+    </style>
+</head>
+<body>
+<div class="page-wrapper">
+    <!-- HEADER -->
+    <div class="header">
+        <div class="header-left">
+            <div class="header-title">
+                <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+                </svg>
+                KGP Division &mdash; Crew On Duty
+            </div>
+            <div class="header-subtitle">SOUTH EASTERN RAILWAY &middot; LIVE SIGN-ON REGISTER &middot; READ ONLY</div>
+        </div>
+        <div class="header-center">
+            <div class="search-wrap">
+                <svg class="search-icon" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
+                </svg>
+                <input type="text" id="searchInput" class="search-input" placeholder="Search crew ID or name...">
+            </div>
+        </div>
+        <div class="header-right">
+            <span class="view-badge">VIEW ONLY</span>
+            <span class="live-clock" id="liveClock">--:--:--</span>
+            <span class="auto-refresh-badge" id="refreshBadge">Refresh in 5:00</span>
+        </div>
+    </div>
+
+    <!-- STATS BAR -->
+    <div class="stats-bar">
+        <div class="stats-group">
+            <div class="stat-item"><span class="stat-label">TOTAL ON DUTY:</span><span class="stat-val" id="visibleCount">{{ total_signon }}</span></div>
+            <div class="stat-item"><span class="stat-label">&gt;10 HRS:</span><span class="stat-val amber">{{ total_10_hrs }}</span></div>
+            <div class="stat-item"><span class="stat-label">&gt;12 HRS:</span><span class="stat-val red">{{ total_12_hrs }}</span></div>
+        </div>
+        <div class="legend">
+            <span style="font-size:10px;font-weight:600;color:#64748b;margin-right:2px;">DATA SOURCE:</span>
+            <span class="legend-item"><span class="legend-dot dot-cms"></span>CMS Record</span>
+            <span class="legend-item"><span class="legend-dot dot-sub"></span>Crew Submission</span>
+            <span class="legend-item"><span class="legend-dot dot-admin"></span>Admin Edit</span>
+        </div>
+    </div>
+
+    <!-- LOBBY FILTER -->
+    <div class="lobby-bar" id="lobbyBar">
+        <span class="lobby-bar-label">LOBBY:</span>
+        <button class="lobby-chip lobby-chip-all active" data-lobby="ALL">All</button>
+        <button class="lobby-chip lobby-chip-kgp"  data-lobby="KGP">KGP</button>
+        <button class="lobby-chip lobby-chip-nmp"  data-lobby="NMP">NMP</button>
+        <button class="lobby-chip lobby-chip-bls"  data-lobby="BLS">BLS</button>
+        <button class="lobby-chip lobby-chip-gts"  data-lobby="GTS">GTS</button>
+        <button class="lobby-chip lobby-chip-adl"  data-lobby="ADL">ADL</button>
+        <button class="lobby-chip lobby-chip-src"  data-lobby="SRC">SRC</button>
+        <button class="lobby-chip lobby-chip-tpkr" data-lobby="TPKR">TPKR</button>
+    </div>
+
+    <!-- TABLE -->
+    <div class="table-wrap">
+        <table id="crewTable">
+            <thead>
+                <tr>
+                    <th data-col="0">Crew ID</th>
+                    <th data-col="1">Name</th>
+                    <th data-col="2">Ord Time</th>
+                    <th data-col="3">Sign On</th>
+                    <th data-col="4" style="text-align:center">CTO Time</th>
+                    <th data-col="5" style="text-align:center">Dept Time</th>
+                    <th data-col="6">PDD</th>
+                    <th data-col="7">Duty Hrs</th>
+                    <th data-col="8">From</th>
+                    <th data-col="9">To</th>
+                    <th data-col="10" style="text-align:center">Loco No</th>
+                    <th data-col="11">Train No</th>
+                    <th data-col="12" style="text-align:center">BPC No</th>
+                    <th data-col="13" style="text-align:center">Location</th>
+                    <th data-col="14" style="text-align:center">Relief</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                {% for crew in crew_list %}
+                {% set src = crew._src %}
+                {%- set lobby_prefix = crew.crew_id[:4] if crew.crew_id|length >= 4 and crew.crew_id[:4] == 'TPKR' else crew.crew_id[:3] -%}
+                {% set base_class = 'row-miss' if crew.ingest_miss_count >= 3 else ('row-relief' if crew.is_relief == 1 else '') %}
+                <tr class="{{ base_class }}" data-crew="{{ crew.crew_id }}" data-name="{{ crew.name | lower }}" data-lobby="{{ lobby_prefix }}">
+                    <td class="crew-id-cell">{{ crew.crew_id }}</td>
+                    <td class="name-cell" title="{{ crew.name }}">{{ crew.name }}</td>
+                    <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '&ndash;' }}</td>
+                    <td style="white-space:nowrap">{{ crew.sign_on_time }}</td>
+                    <td class="src-{{ src.cto_time }} td-center">{{ crew.cto_time if crew.cto_time and crew.cto_time != '-' else '&ndash;' }}</td>
+                    <td class="src-{{ src.departure_time }} td-center">
+                        <span class="{% if crew.is_rtis_departure %}dept-rtis{% elif src.departure_time == 'admin' %}dept-admin{% elif src.departure_time == 'sub' %}dept-sub{% else %}dept-none{% endif %}">
+                            {{ crew.departure_time if crew.departure_time and crew.departure_time != '-' else '&ndash;' }}
+                        </span>
+                    </td>
+                    <td><span class="pdd-val">{{ crew.pdd }}</span></td>
+                    <td>
+                        <span class="duty-cell" id="duty-{{ crew.crew_id }}" data-signon="{{ crew._sign_on_iso }}">
+                            {{ crew.duty_hrs if crew.duty_hrs else '&ndash;' }}
+                        </span>
+                    </td>
+                    <td>{{ crew.from_sttn }}</td>
+                    <td>{{ crew.to_sttn if crew.to_sttn else '&ndash;' }}</td>
+                    <td class="src-{{ src.loco_no }} td-center">
+                        <span>{{ crew.loco_no if crew.loco_no else '&ndash;' }}</span>
+                        {% if crew._latest_rtis_loco %}
+                        <div class="rtis-hint" title="RTIS Updated: {{ crew._latest_rtis_loco.time }}&#10;Lat: {{ crew._latest_rtis_loco.lat }}&#10;Lon: {{ crew._latest_rtis_loco.lon }}">
+                            <svg width="9" height="9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            </svg>
+                            {{ crew._latest_rtis_loco.loc }}
+                        </div>
+                        {% endif %}
+                    </td>
+                    <td class="src-{{ src.train_no }}">{{ crew.train_no if crew.train_no else '&ndash;' }}</td>
+                    <td class="src-{{ src.bpc_no }} td-center">{{ crew.bpc_no if crew.bpc_no else '&ndash;' }}</td>
+                    <td class="src-{{ src.current_location }} td-center">
+                        {% if crew.current_location %}
+                        <div class="loc-text {% if crew.is_rtis_location %}loc-rtis{% endif %}">{{ crew.current_location }}</div>
+                        {% else %}<span style="color:#334155">&ndash;</span>{% endif %}
+                        {% if crew._loc_update_time %}
+                        <div class="loc-time">{{ crew._loc_update_time }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="td-center">
+                        {% if crew.is_relief == 1 %}
+                        <div class="relief-badge">
+                            <span class="relief-station">{{ crew.relief_station if crew.relief_station else 'RELIEF' }}</span>
+                            {% if crew.relief_datetime and crew.relief_datetime != '-' %}
+                            <span class="relief-time">{{ crew.relief_datetime }}</span>
+                            {% endif %}
+                        </div>
+                        {% else %}<span style="color:#334155">&ndash;</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not crew_list %}
+                <tr class="empty-row"><td colspan="15">No crew records found.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="readonly-banner">Read-only public view &mdash; Refreshes every 5 minutes</div>
+
+<script>
+function getISTNow(){var n=new Date();return new Date(n.getTime()+n.getTimezoneOffset()*60000+5.5*3600000);}
+function padZ(n){return String(n).padStart(2,'0');}
+(function clockTick(){
+    var t=getISTNow();
+    document.getElementById('liveClock').textContent=padZ(t.getHours())+':'+padZ(t.getMinutes())+':'+padZ(t.getSeconds())+' IST';
+    setTimeout(clockTick,1000);
+})();
+var secsLeft=300;
+(function refreshTick(){
+    var m=Math.floor(secsLeft/60),s=secsLeft%60;
+    document.getElementById('refreshBadge').textContent='Refresh in '+m+':'+padZ(s);
+    if(--secsLeft<0){location.reload();return;}
+    setTimeout(refreshTick,1000);
+})();
+function minutesToHHMM(m){return padZ(Math.floor(m/60))+':'+padZ(m%60);}
+function getDutyClass(m){
+    if(m>=600)return'dh-critical';if(m>=480)return'dh-high';
+    if(m>=360)return'dh-mid';if(m>=240)return'dh-low';return'dh-ok';
+}
+function updateDuty(){
+    var now=getISTNow();
+    document.querySelectorAll('.duty-cell[data-signon]').forEach(function(cell){
+        var iso=cell.dataset.signon;if(!iso)return;
+        var signOn=new Date(iso+'+05:30');if(isNaN(signOn.getTime()))return;
+        var mins=Math.max(0,Math.floor((now-signOn)/60000));
+        cell.textContent=minutesToHHMM(mins);
+        cell.className='duty-cell '+getDutyClass(mins);
+    });
+}
+updateDuty();setInterval(updateDuty,30000);
+var activeLobby='ALL';
+document.getElementById('lobbyBar').addEventListener('click',function(e){
+    var chip=e.target.closest('.lobby-chip');if(!chip)return;
+    activeLobby=chip.dataset.lobby;
+    document.querySelectorAll('.lobby-chip').forEach(function(c){c.classList.remove('active');});
+    chip.classList.add('active');filterRows();
+});
+document.getElementById('searchInput').addEventListener('input',filterRows);
+function filterRows(){
+    var q=document.getElementById('searchInput').value.trim().toLowerCase(),vis=0;
+    document.querySelectorAll('#tableBody tr[data-crew]').forEach(function(row){
+        var lobbyOk=(activeLobby==='ALL'||row.dataset.lobby===activeLobby);
+        var searchOk=(!q||(row.dataset.crew||'').toLowerCase().includes(q)||(row.dataset.name||'').includes(q));
+        row.style.display=(lobbyOk&&searchOk)?'':'none';
+        if(lobbyOk&&searchOk)vis++;
+    });
+    document.getElementById('visibleCount').textContent=vis;
+}
+var sortCol=-1,sortDir=1;
+document.querySelectorAll('th[data-col]').forEach(function(th){
+    th.addEventListener('click',function(){
+        var col=parseInt(th.dataset.col);
+        if(sortCol===col){sortDir*=-1;}else{sortCol=col;sortDir=1;}
+        document.querySelectorAll('th').forEach(function(h){h.classList.remove('sorted-asc','sorted-desc');});
+        th.classList.add(sortDir===1?'sorted-asc':'sorted-desc');
+        var tbody=document.getElementById('tableBody');
+        var rows=Array.from(tbody.querySelectorAll('tr[data-crew]'));
+        rows.sort(function(a,b){
+            var aT=(a.cells[col]?a.cells[col].textContent.trim():'');
+            var bT=(b.cells[col]?b.cells[col].textContent.trim():'');
+            var aN=parseFloat(aT.replace(/[^\d.]/g,''));var bN=parseFloat(bT.replace(/[^\d.]/g,''));
+            if(!isNaN(aN)&&!isNaN(bN))return(aN-bN)*sortDir;
+            return aT.localeCompare(bT)*sortDir;
+        });
+        rows.forEach(function(r){tbody.appendChild(r);});
+    });
+});
+</script>
+</body>
+</html>

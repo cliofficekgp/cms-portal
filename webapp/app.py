@@ -2381,6 +2381,20 @@ def crew_list():
                            total_12_hrs=total_12_hrs,
                            rtis_locations=rtis_locations)
 
+@app.route('/live')
+def public_crew_list():
+    """Public read-only crew list — no login required, phone numbers excluded."""
+    conn = get_db()
+    data, total_signon, total_10_hrs, total_12_hrs, rtis_locations = _get_crew_list_data(conn)
+    conn.close()
+
+    return render_template('public_crew_list.html',
+                           crew_list=data,
+                           total_signon=total_signon,
+                           total_10_hrs=total_10_hrs,
+                           total_12_hrs=total_12_hrs,
+                           rtis_locations=rtis_locations)
+
 @app.route('/api/save_ns_status', methods=['POST'])
 @login_required
 def save_ns_status():
