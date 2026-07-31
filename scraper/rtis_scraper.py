@@ -496,10 +496,25 @@ def main_loop():
                     loco_data = resp.json()
                     active_locos = loco_data.get('locos', [])
                     loco_mapping = loco_data.get('mapping', {})
+                    locos_to_release = loco_data.get('locos_to_release', [])
                 except Exception as e:
                     print(f"[RTIS] Error fetching locos from app: {e}")
                     active_locos = []
-                    
+                    locos_to_release = []
+
+                # Release stale loco tracking (crew signed off or relieved)
+                for stale_loco in locos_to_release:
+                    try:
+                        requests.post(
+                            f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/release_loco",
+                            json={'loco_no': stale_loco},
+                            headers={'X-API-Secret': API_SECRET},
+                            timeout=5
+                        )
+                        print(f"[RTIS] Released stale loco {stale_loco} from tracking.")
+                    except Exception as e:
+                        print(f"[RTIS] Error releasing loco {stale_loco}: {e}")
+
                 if not active_locos:
                     send_state_to_admin('sleeping', 'No active locos to track. Sleeping...')
                 else:
