@@ -1,4 +1,5 @@
-import os, time, datetime, base64, io, json, traceback, zoneinfo, socket, random, math
+import os, sys, time, datetime, base64, io, json, traceback, zoneinfo, socket, random, math, logging, sqlite3
+from logging.handlers import RotatingFileHandler
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -13,10 +14,36 @@ from google.cloud import vision
 # -----------------------------------------------------------------------------
 # Timing & State Helpers
 # -----------------------------------------------------------------------------
-import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
+
+# ── LOGGING SETUP ──────────────────────────────────────────────────────────────
+# Logs go to:  data/rtis_scraper.log  (rotated at 2 MB, keeps 3 backups)
+# AND to console stdout so the admin panel also captures them.
+_log_path = os.path.join(DATA_DIR, 'rtis_scraper.log')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+logger = logging.getLogger('rtis')
+logger.setLevel(logging.DEBUG)
+
+_fmt = logging.Formatter(
+    fmt='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%d/%m/%y %H:%M:%S'
+)
+
+# File handler — rotating, max 2 MB, 3 backups
+_fh = RotatingFileHandler(_log_path, maxBytes=2 * 1024 * 1024, backupCount=3, encoding='utf-8')
+_fh.setLevel(logging.DEBUG)
+_fh.setFormatter(_fmt)
+logger.addHandler(_fh)
+
+# Console handler — INFO+ so it mirrors existing output
+_ch = logging.StreamHandler(sys.stdout)
+_ch.setLevel(logging.INFO)
+_ch.setFormatter(_fmt)
+logger.addHandler(_ch)
+# ── END LOGGING SETUP ──────────────────────────────────────────────────────────
 
 def check_stop_signal():
     stop_file = os.path.join(DATA_DIR, 'rtis_stop.txt')
@@ -489,40 +516,58 @@ def main_loop():
                     driver.quit()
                     sys.exit(0)
                     
+                # ── CYCLE START ────────────────────────────────────────────
+                cycle_ts = datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
+                logger.info("="*70)
+                logger.info(f"CYCLE START  {cycle_ts}")
+                logger.info("="*70)
+
                 # Fetch active locos from Webapp API
                 send_state_to_admin('running', 'Fetching active locos from DB...')
                 try:
-                    resp = requests.get(f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/active_locos", headers={'X-API-Secret': API_SECRET})
+                    resp = requests.get(
+                        f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/active_locos",
+                        headers={'X-API-Secret': API_SECRET}
+                    )
                     loco_data = resp.json()
                     active_locos = loco_data.get('locos', [])
                     loco_mapping = loco_data.get('mapping', {})
                     locos_to_release = loco_data.get('locos_to_release', [])
+                    logger.info(f"Active locos ({len(active_locos)}): {sorted(active_locos)}")
+                    logger.debug(f"Loco→Crew mapping: {loco_mapping}")
+                    if locos_to_release:
+                        logger.info(f"Locos to release ({len(locos_to_release)}): {locos_to_release}")
                 except Exception as e:
-                    print(f"[RTIS] Error fetching locos from app: {e}")
+                    logger.error(f"Error fetching active_locos from app: {e}")
                     active_locos = []
                     locos_to_release = []
 
                 # Release stale loco tracking (crew signed off or relieved)
                 for stale_loco in locos_to_release:
                     try:
-                        requests.post(
+                        r_rel = requests.post(
                             f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/release_loco",
                             json={'loco_no': stale_loco},
                             headers={'X-API-Secret': API_SECRET},
                             timeout=5
                         )
-                        print(f"[RTIS] Released stale loco {stale_loco} from tracking.")
+                        logger.info(f"Released stale loco {stale_loco}: HTTP {r_rel.status_code}")
                     except Exception as e:
-                        print(f"[RTIS] Error releasing loco {stale_loco}: {e}")
+                        logger.error(f"Error releasing loco {stale_loco}: {e}")
 
                 if not active_locos:
+                    logger.info("No active locos to track — sleeping.")
                     send_state_to_admin('sleeping', 'No active locos to track. Sleeping...')
                 else:
                     send_state_to_admin('running', f'Tracking locations for {len(active_locos)} locos...')
-                    
-                    # Track each loco
-                    for loco in active_locos:
+
+                    # ── TRACK EACH LOCO ───────────────────────────────────
+                    for loco_idx, loco in enumerate(active_locos, 1):
                         if check_stop_signal(): break
+
+                        crew_id = loco_mapping.get(loco, 'UNKNOWN')
+                        logger.info(f"--- [{loco_idx}/{len(active_locos)}] Loco {loco} | Crew {crew_id} ---")
+
                         payload = {
                             "div": "",
                             "idList": [],
@@ -532,36 +577,81 @@ def main_loop():
                             "flag": "L",
                             "filter": "Loco"
                         }
-                        
+
                         try:
                             resp = session.post(
                                 'https://rtis.indianrail.gov.in/RTISDashboard/LiveDataForDivision',
                                 json=payload, headers=headers, timeout=15
                             )
-                            if loco == active_locos[0]:
-                                print(f"[RTIS-DEBUG] First loco {loco} response: {resp.status_code} - {resp.text[:300]}", flush=True)
-                                
+                            logger.info(f"  RTIS HTTP {resp.status_code}")
+                            logger.debug(f"  RTIS raw response: {resp.text[:600]}")
+
                             if resp.status_code == 200:
-                                data = resp.json()
+                                try:
+                                    data = resp.json()
+                                except Exception as je:
+                                    logger.error(f"  JSON parse error: {je} | body={resp.text[:300]}")
+                                    if human_delay(1, 3): break
+                                    continue
+
                                 live_data = data.get('locoLiveData')
-                                if live_data and isinstance(live_data, dict) and live_data.get('latitude') and live_data.get('longitude'):
+                                logger.debug(f"  locoLiveData: {live_data}")
+
+                                # ── Check sameDiv / movedIn / movedOut ──────
+                                same_div  = data.get('sameDiv', [])
+                                moved_in  = data.get('movedIn', [])
+                                moved_out = data.get('movedOut', [])
+                                if same_div or moved_in or moved_out:
+                                    logger.debug(f"  sameDiv={len(same_div)} movedIn={len(moved_in)} movedOut={len(moved_out)}")
+
+                                if (live_data and isinstance(live_data, dict)
+                                        and live_data.get('latitude') and live_data.get('longitude')):
+
                                     lat = float(live_data['latitude'])
                                     lon = float(live_data['longitude'])
-                                    stn = live_data.get('locoStationCode', 'Unknown')
-                                    
-                                    conn2 = sqlite3.connect(os.path.join(DATA_DIR, 'crew.db'), timeout=10.0)
-                                    prev_row = conn2.execute("SELECT latitude, longitude FROM loco_locations WHERE loco_no = ?", (loco,)).fetchone()
-                                    conn2.close()
-                                    
-                                    moved_gt_100m = False
+                                    stn = live_data.get('locoStationCode') or 'Unknown'
+                                    recv_ts = live_data.get('recvDatetime', '')
+                                    spd = live_data.get('speed', '')
+                                    train_no = live_data.get('trainNumber', '')
+
+                                    logger.info(
+                                        f"  Location: {stn} | lat={lat:.6f} lon={lon:.6f} "
+                                        f"speed={spd} train={train_no} recvAt={recv_ts}"
+                                    )
+
+                                    # ── Previous row from DB ─────────────────
+                                    try:
+                                        conn2 = sqlite3.connect(os.path.join(DATA_DIR, 'crew.db'), timeout=10.0)
+                                        prev_row = conn2.execute(
+                                            "SELECT latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?",
+                                            (loco,)
+                                        ).fetchone()
+                                        conn2.close()
+                                    except Exception as db_err:
+                                        logger.error(f"  DB prev_row read error: {db_err}")
+                                        prev_row = None
+
                                     if prev_row:
-                                        prev_lat, prev_lon = prev_row
-                                        if prev_lat is not None and prev_lon is not None:
-                                            dist = haversine_distance(prev_lat, prev_lon, lat, lon)
-                                            if dist > 0.1: # 0.1 km = 100 meters
-                                                moved_gt_100m = True
-                                            
-                                    crew_id = loco_mapping.get(loco)
+                                        prev_lat, prev_lon, prev_stn, prev_upd = prev_row
+                                        logger.info(
+                                            f"  DB prev: {prev_stn} lat={prev_lat} lon={prev_lon} updated={prev_upd}"
+                                        )
+                                    else:
+                                        prev_lat = prev_lon = None
+                                        logger.info(f"  DB prev: no existing row (will INSERT)")
+
+                                    # ── Distance check ───────────────────────
+                                    moved_gt_100m = False
+                                    if prev_lat is not None and prev_lon is not None:
+                                        dist = haversine_distance(prev_lat, prev_lon, lat, lon)
+                                        moved_gt_100m = dist > 0.1
+                                        logger.info(
+                                            f"  Distance from prev: {dist*1000:.1f} m  moved_gt_100m={moved_gt_100m}"
+                                        )
+                                    else:
+                                        logger.info(f"  Distance: N/A (no prev coords)")
+
+                                    # ── Sync to DB via Flask API ─────────────
                                     sync_payload = {
                                         "loco_no": loco,
                                         "crew_id": crew_id,
@@ -570,6 +660,8 @@ def main_loop():
                                         "location_name": stn,
                                         "moved_gt_100m": moved_gt_100m
                                     }
+                                    logger.debug(f"  sync_loco payload: {sync_payload}")
+
                                     try:
                                         sync_resp = requests.post(
                                             f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/sync_loco",
@@ -577,22 +669,33 @@ def main_loop():
                                             headers={'X-API-Secret': API_SECRET},
                                             timeout=10
                                         )
-                                        if sync_resp.status_code != 200:
-                                            print(f"[RTIS] sync_loco failed for {loco}: HTTP {sync_resp.status_code} - {sync_resp.text[:200]}")
+                                        if sync_resp.status_code == 200:
+                                            logger.info(
+                                                f"  DB WRITE OK: {stn} moved={moved_gt_100m} "
+                                                f"| response={sync_resp.json()}"
+                                            )
                                         else:
-                                            print(f"[RTIS] Synced loco {loco} ({crew_id}): {stn} moved={moved_gt_100m}")
+                                            logger.error(
+                                                f"  DB WRITE FAILED: HTTP {sync_resp.status_code} "
+                                                f"body={sync_resp.text[:300]}"
+                                            )
                                     except Exception as sync_err:
-                                        print(f"[RTIS] sync_loco POST error for {loco}: {sync_err}")
-                            else:
-                                if resp.status_code == 200:
-                                    data = resp.json()
-                                    live_data = data.get('locoLiveData')
-                                    print(f"[RTIS] Loco {loco}: no valid lat/lon - locoLiveData={live_data}")
+                                        logger.error(f"  sync_loco POST error: {sync_err}")
+
                                 else:
-                                    print(f"[RTIS] Loco {loco}: HTTP {resp.status_code}")
+                                    # No valid lat/lon in response
+                                    logger.warning(
+                                        f"  No valid lat/lon — locoLiveData={live_data}"
+                                    )
+                            else:
+                                logger.error(
+                                    f"  RTIS non-200 response: HTTP {resp.status_code} "
+                                    f"body={resp.text[:300]}"
+                                )
+
                         except Exception as e:
-                            print(f"[RTIS] Error querying loco {loco}: {e}")
-                        
+                            logger.error(f"  Exception querying loco {loco}: {e}", exc_info=True)
+
                         if human_delay(1, 3): break
 
                 requests.post(f"{FLASK_API_URL}/state", json={'last_run': datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')}, headers={'X-API-Secret': API_SECRET})
