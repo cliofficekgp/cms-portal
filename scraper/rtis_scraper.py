@@ -567,6 +567,7 @@ def main_loop():
                 else:
                     send_state_to_admin('running', f'Tracking locations for {len(active_locos)} locos...')
 
+                    token_expired = False
                     # ── TRACK EACH LOCO ───────────────────────────────────
                     for loco_idx, loco in enumerate(active_locos, 1):
                         if check_stop_signal(): break
@@ -698,6 +699,10 @@ def main_loop():
                                     f"  RTIS non-200 response: HTTP {resp.status_code} "
                                     f"body={resp.text[:300]}"
                                 )
+                                if resp.status_code in (401, 403):
+                                    logger.error("Token expired or rejected. Breaking tracking cycle to re-authenticate.")
+                                    token_expired = True
+                                    break
 
                         except Exception as e:
                             logger.error(f"  Exception querying loco {loco}: {e}", exc_info=True)
@@ -705,6 +710,10 @@ def main_loop():
                         if human_delay(1, 3): break
 
                 requests.post(f"{FLASK_API_URL}/state", json={'last_run': datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')}, headers={'X-API-Secret': API_SECRET})
+                
+                if token_expired:
+                    logger.info("Token expired. Quitting driver to trigger full re-authentication...")
+                    break  # Break out of the continuous tracking loop; outer while True will restart session
                 
                 sleep_seconds = random_cycle_sleep_seconds(12, 18)
                 send_state_to_admin('sleeping', f'Sync cycle complete. Sleeping for {sleep_seconds/60:.1f} minutes...')
