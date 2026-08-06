@@ -431,22 +431,28 @@ def main_loop():
 
                 send_state_to_admin('waiting_for_otp', 'OTP required. Please enter today\'s RTIS OTP.', True, 'otp', phone_number=phone_number)
                 otp_val = None
-                # Try to use today's OTP if we already saved it in this run
+                # Try to use today's OTP if we already saved it (compare by IST date, not local time)
                 otp_file = os.path.join(DATA_DIR, 'rtis_otp.txt')
+                today_ist = datetime.datetime.now(IST).date()
                 if os.path.exists(otp_file):
-                    # check if modified today
                     mtime = os.path.getmtime(otp_file)
-                    if datetime.datetime.fromtimestamp(mtime).date() == datetime.datetime.today().date():
+                    mtime_ist = datetime.datetime.fromtimestamp(mtime, tz=IST).date()
+                    if mtime_ist == today_ist:
                         with open(otp_file, 'r') as f:
                             otp_val = f.read().strip()
+                        logger.info(f"Reusing saved RTIS OTP for {today_ist} (file dated {mtime_ist})")
+                    else:
+                        logger.info(f"Saved OTP is from {mtime_ist}, today is {today_ist} (IST) — asking fresh.")
                 
                 if not otp_val:
                     otp_val = wait_for_admin_input(300)
                     if not otp_val:
                         driver.quit()
                         continue
-                    # Save for today
+                    # Save for today (IST)
                     with open(otp_file, 'w') as f: f.write(otp_val)
+                    logger.info(f"RTIS OTP saved to {otp_file}")
+
                     
                 send_state_to_admin('running', 'Submitting OTP...')
                 otp_field = driver.find_element(By.NAME, "otp")

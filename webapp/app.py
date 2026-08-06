@@ -2094,10 +2094,11 @@ def _get_crew_list_data(conn):
         if row.get('is_relief') == 1:
             run_rtis_check = False
             
-        # Skip RTIS check if loco_no came strictly from CMS
-        if row.get('_src', {}).get('loco_no') == 'cms':
-            run_rtis_check = False
-            
+        if run_rtis_check:
+            loco_no_str = row.get('loco_no')
+            if not loco_no_str or loco_no_str in ('', '-'):
+                run_rtis_check = False
+
         if run_rtis_check:
             loco_no_str = row.get('loco_no')
             # Build candidate list: search by loco_no first, then fall back to crew_id match
