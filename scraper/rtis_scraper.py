@@ -460,17 +460,33 @@ def main_loop():
                 otp_field.send_keys(otp_val)
                 if human_delay(0.5, 1.0): sys.exit(0)
                 driver.find_element(By.XPATH, "//button[contains(text(), 'Submit OTP')]").click()
-                if human_delay(3, 5): sys.exit(0)
-                
-                if "Invalid OTP" in driver.page_source:
-                    if os.path.exists(otp_file): os.remove(otp_file)
+                # Wait for redirect to dashboard after OTP submission
+                send_state_to_admin('running', 'Waiting for RTIS Dashboard redirect...')
+                redirected = False
+                for _ in range(15):
+                    if "shedHome" in driver.current_url or "divisionLiveLocoOnMap" in driver.current_url:
+                        redirected = True
+                        break
+                    if "Invalid OTP" in driver.page_source or "invalid" in driver.page_source.lower() and "otp" in driver.page_source.lower():
+                        logger.error("Invalid/Expired OTP detected on page.")
+                        if os.path.exists(otp_file): os.remove(otp_file)
+                        break
+                    interruptible_sleep(1)
+
+                if not redirected:
+                    logger.error(f"Failed to redirect to RTIS Dashboard. Current URL: {driver.current_url}")
+                    # If we failed to redirect, the saved OTP was likely already used/rejected. Clear it so user is asked fresh.
+                    if os.path.exists(otp_file):
+                        logger.warning(f"Removing invalid/expired OTP file: {otp_file}")
+                        os.remove(otp_file)
+                    send_state_to_admin('error', 'OTP rejected or failed to reach dashboard. Please provide fresh OTP.')
                     driver.quit()
+                    interruptible_sleep(10)
                     continue
 
             # Wait for dashboard to load (success)
-            if "RTISDashboardUI/shed/shedHome" not in driver.current_url and "Dashboard" not in driver.page_source:
-                # Still failing?
-                send_state_to_admin('error', 'Failed to reach RTIS Dashboard after login/OTP.')
+            if "shedHome" not in driver.current_url and "divisionLiveLocoOnMap" not in driver.current_url:
+                send_state_to_admin('error', f'Failed to reach RTIS Dashboard. URL: {driver.current_url}')
                 driver.quit()
                 interruptible_sleep(30)
                 continue
