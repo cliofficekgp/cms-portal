@@ -1810,22 +1810,22 @@ def release_loco():
 
 def _get_crew_list_data(conn):
     # Mark signed off crews as inactive
-    with DB_WRITE_LOCK:
-        conn.execute('''
-            UPDATE crew_records 
-            SET is_active = 0 
-            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
-        ''')
-        conn.execute('''
-            UPDATE crew_submissions 
-            SET is_active = 0 
-            WHERE is_active = 1 
-            AND crew_id IN (
-                SELECT crew_id FROM crew_records 
-                WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
-            )
-        ''')
-        conn.commit()
+    # Mark signed off crews as inactive (no lock needed — WAL handles concurrent reads/writes)
+    conn.execute('''
+        UPDATE crew_records 
+        SET is_active = 0 
+        WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
+    ''')
+    conn.execute('''
+        UPDATE crew_submissions 
+        SET is_active = 0 
+        WHERE is_active = 1 
+        AND crew_id IN (
+            SELECT crew_id FROM crew_records 
+            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
+        )
+    ''')
+    conn.commit()
 
     query = '''
     SELECT 
@@ -1929,6 +1929,7 @@ def _get_crew_list_data(conn):
     _del_relief_admin   = []   # crew_id
     _null_relief_sub    = []   # crew_id
     _release_locos      = []   # loco_no — to delete from loco_locations
+    _freeze_departure   = []   # (crew_id, new_dep, updated_at) — RTIS auto-frozen departure times
     
 
 
@@ -2169,10 +2170,8 @@ def _get_crew_list_data(conn):
                                     _del_loc_admin.append(row['crew_id'])
                                     _null_loc_sub.append(row['crew_id'])
                                     updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-                                    with DB_WRITE_LOCK:
-                                        conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], new_dep, updated_at_freeze))
-                                        conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'is_rtis_departure', '1', ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (row['crew_id'], updated_at_freeze))
-                                        conn.commit()
+                                    # Queue the freeze into the deferred batch instead of writing inline
+                                    _freeze_departure.append((row['crew_id'], new_dep, updated_at_freeze))
 
 
         # Read 'is_rtis_departure' from admin_edits if present
@@ -2329,7 +2328,9 @@ def _get_crew_list_data(conn):
         updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
         with DB_WRITE_LOCK:
             # We don't save frozen_pdd anymore, but we still need to save auto-freezed departure_time
-            # However, departure_time is saved inline when detected, so _freeze_pdd is no longer needed here.
+            for cid, dep_val, dep_ts in _freeze_departure:
+                conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (cid, dep_val, dep_ts))
+                conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'is_rtis_departure', '1', ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (cid, dep_ts))
             for cid, field in _del_admin_edits:
                 conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
             for cid in _del_submissions:
