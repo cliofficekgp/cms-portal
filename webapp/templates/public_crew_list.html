@@ -188,24 +188,24 @@
                 <tr class="{{ base_class }}" data-crew="{{ crew.crew_id }}" data-name="{{ crew.name | lower }}" data-lobby="{{ lobby_prefix }}">
                     <td class="crew-id-cell">{{ crew.crew_id }}</td>
                     <td class="name-cell" title="{{ crew.name }}">{{ crew.name }}</td>
-                    <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '&ndash;' }}</td>
+                    <td style="white-space:nowrap">{{ crew.ordering_time if crew.ordering_time else '–' }}</td>
                     <td style="white-space:nowrap">{{ crew.sign_on_time }}</td>
-                    <td class="src-{{ src.cto_time }} td-center">{{ crew.cto_time if crew.cto_time and crew.cto_time != '-' else '&ndash;' }}</td>
+                    <td class="src-{{ src.cto_time }} td-center">{{ crew.cto_time if crew.cto_time and crew.cto_time != '-' else '–' }}</td>
                     <td class="src-{{ src.departure_time }} td-center">
                         <span class="{% if crew.is_rtis_departure %}dept-rtis{% elif src.departure_time == 'admin' %}dept-admin{% elif src.departure_time == 'sub' %}dept-sub{% else %}dept-none{% endif %}">
-                            {{ crew.departure_time if crew.departure_time and crew.departure_time != '-' else '&ndash;' }}
+                            {{ crew.departure_time if crew.departure_time and crew.departure_time != '-' else '–' }}
                         </span>
                     </td>
                     <td><span class="pdd-val">{{ crew.pdd }}</span></td>
                     <td>
                         <span class="duty-cell" id="duty-{{ crew.crew_id }}" data-signon="{{ crew._sign_on_iso }}">
-                            {{ crew.duty_hrs if crew.duty_hrs else '&ndash;' }}
+                            {{ crew.duty_hrs if crew.duty_hrs else '–' }}
                         </span>
                     </td>
                     <td>{{ crew.from_sttn }}</td>
-                    <td>{{ crew.to_sttn if crew.to_sttn else '&ndash;' }}</td>
+                    <td>{{ crew.to_sttn if crew.to_sttn else '–' }}</td>
                     <td class="src-{{ src.loco_no }} td-center">
-                        <span>{{ crew.loco_no if crew.loco_no else '&ndash;' }}</span>
+                        <span>{{ crew.loco_no if crew.loco_no else '–' }}</span>
                         {% if crew._latest_rtis_loco %}
                         <div class="rtis-hint" title="RTIS Updated: {{ crew._latest_rtis_loco.time }}&#10;Lat: {{ crew._latest_rtis_loco.lat }}&#10;Lon: {{ crew._latest_rtis_loco.lon }}">
                             <svg width="9" height="9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -216,8 +216,8 @@
                         </div>
                         {% endif %}
                     </td>
-                    <td class="src-{{ src.train_no }}">{{ crew.train_no if crew.train_no else '&ndash;' }}</td>
-                    <td class="src-{{ src.bpc_no }} td-center">{{ crew.bpc_no if crew.bpc_no else '&ndash;' }}</td>
+                    <td class="src-{{ src.train_no }}">{{ crew.train_no if crew.train_no else '–' }}</td>
+                    <td class="src-{{ src.bpc_no }} td-center">{{ crew.bpc_no if crew.bpc_no else '–' }}</td>
                     <td class="src-{{ src.current_location }} td-center">
                         {% if crew.current_location %}
                         <div class="loc-text {% if crew.is_rtis_location %}loc-rtis{% endif %}">{{ crew.current_location }}</div>
