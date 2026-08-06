@@ -488,8 +488,15 @@ def main_loop():
                 # Fallback to local storage just in case
                 bearer_token = driver.execute_script("return localStorage.getItem('token') || sessionStorage.getItem('token') || localStorage.getItem('jwtToken');")
                 
-            send_state_to_admin('running', f'Extracting auth token... {"Success" if bearer_token else "Failed!"}')
+            send_state_to_admin('running', f'Extracting auth token... {"Success" if bearer_token else "Failed"}')
             print(f"[RTIS-DEBUG] Token retrieved: {str(bearer_token)[:50]}...", flush=True)
+
+            if not bearer_token:
+                logger.error("Failed to extract token even after reaching dashboard. Restarting session.")
+                send_state_to_admin('error', 'Failed to extract auth token.')
+                driver.quit()
+                interruptible_sleep(30)
+                continue
             
             cookies = driver.get_cookies()
             print(f"[RTIS-DEBUG] Cookies retrieved: {[c['name'] for c in cookies]}", flush=True)

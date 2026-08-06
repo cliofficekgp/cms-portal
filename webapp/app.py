@@ -1705,7 +1705,7 @@ def get_active_locos():
                 else:
                     # Active crew; if relief handover is registered, transfer tracking to handover crew
                     handover = (r['handover_crew_id'] or '').strip().upper()
-                    if handover and r.get('relief_datetime'):
+                    if handover and r['relief_datetime']:
                         mapping[l] = handover
                     else:
                         mapping[l] = r['crew_id']
