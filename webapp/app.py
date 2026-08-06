@@ -1660,11 +1660,11 @@ def get_active_locos():
     locos_to_release = []
     
     try:
-        # Query active crews with their loco from submissions/admin and relief/handover info.
+        # Query active crews with their loco from submissions/admin (ignore CMS loco) and relief/handover info.
         query = '''
         SELECT 
             r.crew_id,
-            COALESCE(a_loco.value, s.loco_no, r.loco_no) AS loco_no,
+            COALESCE(a_loco.value, s.loco_no) AS loco_no,
             COALESCE(a_relief.value, s.is_relief, 0) AS is_relief,
             s.handover_crew_id,
             s.relief_datetime
@@ -1680,7 +1680,9 @@ def get_active_locos():
             SELECT crew_id, value FROM admin_edits WHERE field = 'is_relief'
         ) a_relief ON r.crew_id = a_relief.crew_id
         WHERE r.is_active = 1
-          AND COALESCE(a_loco.value, s.loco_no, r.loco_no) IS NOT NULL
+          AND COALESCE(a_loco.value, s.loco_no) IS NOT NULL
+          AND COALESCE(a_loco.value, s.loco_no) != ''
+          AND COALESCE(a_loco.value, s.loco_no) != '-'
         '''
         rows = conn.execute(query).fetchall()
         
@@ -2094,6 +2096,10 @@ def _get_crew_list_data(conn):
         if row.get('is_relief') == 1:
             run_rtis_check = False
             
+        # Skip RTIS check if loco_no came strictly from CMS (not confirmed by crew/admin)
+        if row.get('_src', {}).get('loco_no') == 'cms':
+            run_rtis_check = False
+
         if run_rtis_check:
             loco_no_str = row.get('loco_no')
             if not loco_no_str or loco_no_str in ('', '-'):
