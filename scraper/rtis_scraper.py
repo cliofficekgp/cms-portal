@@ -480,18 +480,40 @@ def main_loop():
             
             bearer_token = None
             try:
+                # Give the dashboard JS a moment to render the hidden token input
+                interruptible_sleep(5)
                 rtis_val = driver.find_element(By.ID, "RTIS").get_attribute("value")
                 import json
                 bearer_token = json.loads(rtis_val).get("accessToken")
             except Exception as e:
                 print(f"[RTIS-DEBUG] Failed to get token from #RTIS input: {e}")
-                # Fallback to local storage just in case
-                bearer_token = driver.execute_script("return localStorage.getItem('token') || sessionStorage.getItem('token') || localStorage.getItem('jwtToken');")
                 
+            if not bearer_token:
+                # Try many variations of token keys in local/session storage
+                bearer_token = driver.execute_script("""
+                    return localStorage.getItem('token') || 
+                           sessionStorage.getItem('token') || 
+                           localStorage.getItem('jwtToken') ||
+                           sessionStorage.getItem('jwtToken') ||
+                           localStorage.getItem('access_token') ||
+                           sessionStorage.getItem('access_token') ||
+                           localStorage.getItem('accessToken') ||
+                           sessionStorage.getItem('accessToken');
+                """)
+
             send_state_to_admin('running', f'Extracting auth token... {"Success" if bearer_token else "Failed"}')
             print(f"[RTIS-DEBUG] Token retrieved: {str(bearer_token)[:50]}...", flush=True)
 
             if not bearer_token:
+                # Diagnostics: what IS in storage?
+                try:
+                    ls_keys = driver.execute_script("return Object.keys(localStorage);")
+                    ss_keys = driver.execute_script("return Object.keys(sessionStorage);")
+                    logger.error(f"localStorage keys: {ls_keys}")
+                    logger.error(f"sessionStorage keys: {ss_keys}")
+                except Exception as ex:
+                    logger.error(f"Could not dump storage keys: {ex}")
+
                 logger.error("Failed to extract token even after reaching dashboard. Restarting session.")
                 send_state_to_admin('error', 'Failed to extract auth token.')
                 driver.quit()
