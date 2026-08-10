@@ -463,23 +463,28 @@ def main_loop():
                 # Wait for redirect to dashboard after OTP submission
                 send_state_to_admin('running', 'Waiting for RTIS Dashboard redirect...')
                 redirected = False
-                for _ in range(15):
+                invalid_otp = False
+                for _ in range(30):  # Wait up to 30 seconds
                     if "shedHome" in driver.current_url or "divisionLiveLocoOnMap" in driver.current_url:
                         redirected = True
                         break
-                    if "Invalid OTP" in driver.page_source or "invalid" in driver.page_source.lower() and "otp" in driver.page_source.lower():
+                    page_lower = driver.page_source.lower()
+                    if "invalid otp" in page_lower or "otp expired" in page_lower or "otp is invalid" in page_lower:
                         logger.error("Invalid/Expired OTP detected on page.")
+                        invalid_otp = True
                         if os.path.exists(otp_file): os.remove(otp_file)
                         break
                     interruptible_sleep(1)
 
                 if not redirected:
                     logger.error(f"Failed to redirect to RTIS Dashboard. Current URL: {driver.current_url}")
-                    # If we failed to redirect, the saved OTP was likely already used/rejected. Clear it so user is asked fresh.
-                    if os.path.exists(otp_file):
-                        logger.warning(f"Removing invalid/expired OTP file: {otp_file}")
-                        os.remove(otp_file)
-                    send_state_to_admin('error', 'OTP rejected or failed to reach dashboard. Please provide fresh OTP.')
+                    if invalid_otp:
+                        # OTP was explicitly rejected — already deleted above
+                        send_state_to_admin('error', 'OTP was invalid/expired. Please provide fresh OTP.')
+                    else:
+                        # Could be slow network, RTIS server issue, etc. — keep the OTP file for retry
+                        logger.info("Redirect timed out but OTP may still be valid. Keeping saved OTP for retry.")
+                        send_state_to_admin('error', 'RTIS redirect timed out. Retrying...')
                     driver.quit()
                     interruptible_sleep(10)
                     continue
