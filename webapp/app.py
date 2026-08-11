@@ -1741,12 +1741,34 @@ def sync_loco_location():
     now_str = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
     
     try:
-        with DB_WRITE_LOCK:
-            # Check if exists
-            existing = conn.execute('SELECT crew_id, latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
+        # --- Read phase (no lock needed) ---
+        existing = conn.execute('SELECT crew_id, latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
+        
+        # Pre-check departure_time so we don't hold the lock during reads
+        should_set_departure = False
+        if moved and crew_id:
+            existing_dep = conn.execute(
+                "SELECT departure_time FROM crew_submissions WHERE crew_id = ? AND is_active = 1",
+                (crew_id,)
+            ).fetchone()
+            admin_dep = conn.execute(
+                "SELECT value FROM admin_edits WHERE crew_id = ? AND field = 'departure_time'",
+                (crew_id,)
+            ).fetchone()
             
+            has_existing = (existing_dep and existing_dep['departure_time'] and 
+                            existing_dep['departure_time'] not in ('', '-', '–'))
+            has_admin = (admin_dep and admin_dep['value'] and 
+                         admin_dep['value'] not in ('', '-', '–'))
+            
+            if not has_existing and not has_admin:
+                should_set_departure = True
+            else:
+                print(f"[RTIS] Skipped departure_time for {crew_id} — already set by {'admin' if has_admin else 'crew'}")
+
+        # --- Write phase (lock only for writes) ---
+        with DB_WRITE_LOCK:
             if existing:
-                # Update updated_at if: moved >100m, ANY lat/lon change, station name changed, or crew changed
                 crew_changed = (existing['crew_id'] != crew_id)
                 lat_lon_changed = (round(existing['latitude'] or 0, 5) != round(lat or 0, 5) or
                                    round(existing['longitude'] or 0, 5) != round(lon or 0, 5))
@@ -1774,29 +1796,11 @@ def sync_loco_location():
                 ''', (loco_no, crew_id, lat, lon, loc_name, now_str, now_str))
                 print(f"[RTIS] Loco {loco_no} ({crew_id}): NEW entry at {loc_name} | {now_str}")
                 
-            if moved and crew_id:
+            if should_set_departure:
                 try:
-                    # Only set departure_time if NOT already set by crew/admin
-                    existing_dep = conn.execute(
-                        "SELECT departure_time FROM crew_submissions WHERE crew_id = ? AND is_active = 1",
-                        (crew_id,)
-                    ).fetchone()
-                    admin_dep = conn.execute(
-                        "SELECT value FROM admin_edits WHERE crew_id = ? AND field = 'departure_time'",
-                        (crew_id,)
-                    ).fetchone()
-                    
-                    has_existing = (existing_dep and existing_dep['departure_time'] and 
-                                    existing_dep['departure_time'] not in ('', '-', '–'))
-                    has_admin = (admin_dep and admin_dep['value'] and 
-                                 admin_dep['value'] not in ('', '-', '–'))
-                    
-                    if not has_existing and not has_admin:
-                        conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", 
-                                     (now_str, crew_id))
-                        print(f"[RTIS] Set departure_time for {crew_id} (no prior entry)")
-                    else:
-                        print(f"[RTIS] Skipped departure_time for {crew_id} — already set by {'admin' if has_admin else 'crew'}")
+                    conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", 
+                                 (now_str, crew_id))
+                    print(f"[RTIS] Set departure_time for {crew_id} (no prior entry)")
                 except Exception as e:
                     print(f"Error updating departure_time: {e}")
                     
