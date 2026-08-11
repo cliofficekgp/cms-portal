@@ -1776,7 +1776,27 @@ def sync_loco_location():
                 
             if moved and crew_id:
                 try:
-                    conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", (now_str, crew_id))
+                    # Only set departure_time if NOT already set by crew/admin
+                    existing_dep = conn.execute(
+                        "SELECT departure_time FROM crew_submissions WHERE crew_id = ? AND is_active = 1",
+                        (crew_id,)
+                    ).fetchone()
+                    admin_dep = conn.execute(
+                        "SELECT value FROM admin_edits WHERE crew_id = ? AND field = 'departure_time'",
+                        (crew_id,)
+                    ).fetchone()
+                    
+                    has_existing = (existing_dep and existing_dep['departure_time'] and 
+                                    existing_dep['departure_time'] not in ('', '-', '–'))
+                    has_admin = (admin_dep and admin_dep['value'] and 
+                                 admin_dep['value'] not in ('', '-', '–'))
+                    
+                    if not has_existing and not has_admin:
+                        conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", 
+                                     (now_str, crew_id))
+                        print(f"[RTIS] Set departure_time for {crew_id} (no prior entry)")
+                    else:
+                        print(f"[RTIS] Skipped departure_time for {crew_id} — already set by {'admin' if has_admin else 'crew'}")
                 except Exception as e:
                     print(f"Error updating departure_time: {e}")
                     
@@ -1931,7 +1951,7 @@ def _get_crew_list_data(conn):
     _del_relief_admin   = []   # crew_id
     _null_relief_sub    = []   # crew_id
     _release_locos      = []   # loco_no — to delete from loco_locations
-    _freeze_departure   = []   # (crew_id, new_dep, updated_at) — RTIS auto-frozen departure times
+
     
 
 
@@ -2141,45 +2161,37 @@ def _get_crew_list_data(conn):
 
             if latest_loc:
                 loc_str = latest_loc.get('loc')
+                # Treat 'Unknown' or empty as needing fallback
+                if not loc_str or loc_str.strip().lower() in ('', 'unknown'):
+                    loc_str = ''
+                
                 # Fallback to nearest station if loc is empty but lat/lon are present
                 if not loc_str and latest_loc.get('lat') and latest_loc.get('lon'):
-                    loc_str = get_nearest_station(float(latest_loc['lat']), float(latest_loc['lon']))
+                    try:
+                        loc_str = get_nearest_station(float(latest_loc['lat']), float(latest_loc['lon']))
+                    except (ValueError, TypeError):
+                        pass
                 
+                # Always expose loco data for the template tooltip (even if loc_str is empty)
+                display_loc = loc_str if loc_str else ''
+                row['_latest_rtis_loco'] = {
+                    'loc': display_loc,
+                    'time': latest_loc['time'],
+                    'lat': latest_loc.get('lat', ''),
+                    'lon': latest_loc.get('lon', '')
+                }
+                
+                # Set current_location if we have a valid station string
                 if loc_str:
-                    # Expose latest loco data for the template so we don't show multiple locos
-                    row['_latest_rtis_loco'] = {
-                        'loc': loc_str,
-                        'time': latest_loc['time'],
-                        'lat': latest_loc.get('lat', ''),
-                        'lon': latest_loc.get('lon', '')
-                    }
-                    
                     # Compare with manual location update time
                     manual_time = row.get('_loc_time_dt')
                     if not manual_time or (latest_time and latest_time >= manual_time):
                         row['current_location'] = loc_str
                         row['is_rtis_location'] = True
                         row['_loc_update_time'] = latest_time.strftime('%H:%M') if latest_time else latest_loc['time']
-                        
-                        # Auto-freeze PDD if RTIS time is after CTO time
-                        cto_time_str = row.get('cto_time')
-                        if cto_time_str and cto_time_str not in ['-', '–']:
-                            cto_dt = parse_dt(cto_time_str)
-                            # Only if the train has departed (location is not the starting station)
-                            # Actually, latest_time > cto_dt means the train has physically updated its location after CTO
-                            if cto_dt and latest_time and latest_time > cto_dt:
-                                # We freeze it by setting departure_time to the RTIS time
-                                # only if departure_time is not already set by manual intervention
-                                if not row.get('departure_time') or row['departure_time'] in ['-', '–']:
-                                    new_dep = latest_time.strftime('%d/%m/%y %H:%M')
-                                    row['departure_time'] = new_dep
-                                    row['is_rtis_departure'] = True
-                                    _del_loc_admin.append(row['crew_id'])
-                                    _null_loc_sub.append(row['crew_id'])
-                                    updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-                                    # Queue the freeze into the deferred batch instead of writing inline
-                                    _freeze_departure.append((row['crew_id'], new_dep, updated_at_freeze))
-
+                        # Note: Departure time is NOT auto-set here.
+                        # It is only set by: (a) crew submission, (b) admin edit,
+                        # or (c) RTIS scraper detecting >100m movement via /api/rtis/sync_loco.
 
         # Read 'is_rtis_departure' from admin_edits if present
         if crew_admin_edits.get('is_rtis_departure') == '1':
@@ -2334,10 +2346,7 @@ def _get_crew_list_data(conn):
     try:
         updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
         with DB_WRITE_LOCK:
-            # We don't save frozen_pdd anymore, but we still need to save auto-freezed departure_time
-            for cid, dep_val, dep_ts in _freeze_departure:
-                conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'departure_time', ?, ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (cid, dep_val, dep_ts))
-                conn.execute("INSERT INTO admin_edits (crew_id, field, value, updated_at) VALUES (?, 'is_rtis_departure', '1', ?) ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (cid, dep_ts))
+
             for cid, field in _del_admin_edits:
                 conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
             for cid in _del_submissions:

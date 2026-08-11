@@ -701,9 +701,9 @@ def main_loop():
                                     moved_gt_100m = False
                                     if prev_lat is not None and prev_lon is not None:
                                         dist = haversine_distance(prev_lat, prev_lon, lat, lon)
-                                        moved_gt_100m = dist > 0.1
+                                        moved_gt_100m = dist > 100  # haversine_distance returns meters
                                         logger.info(
-                                            f"  Distance from prev: {dist*1000:.1f} m  moved_gt_100m={moved_gt_100m}"
+                                            f"  Distance from prev: {dist:.1f} m  moved_gt_100m={moved_gt_100m}"
                                         )
                                     else:
                                         logger.info(f"  Distance: N/A (no prev coords)")
