@@ -29,7 +29,7 @@ accesslog = "-"   # stdout
 errorlog  = "-"   # stderr
 loglevel  = os.environ.get("LOG_LEVEL", "info")
 
-# Initialise DB before serving first request
-def on_starting(server):
-    from webapp.app import init_db
-    init_db()
+# NOTE: init_db() is called inside create_app(), which runs when the
+# webapp.app module is imported (module-level `app = create_app()`).
+# A separate on_starting hook is unnecessary and previously caused
+# duplicate thread spawns.  Removed.

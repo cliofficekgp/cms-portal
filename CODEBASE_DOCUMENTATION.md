@@ -33,7 +33,7 @@ This is the core of the web server. It manages the following responsibilities:
   - `/submit`: Receives form submissions from the crew and records them in `crew_submissions`. Automatically handles relief crew handover logic (inheriting locomotive details from the previous crew).
 - **Admin Routes**:
   - `/admin`: Dashboard showing the live status of the background scraper. Allows manual trigger and cancellation.
-  - `/admin/settings`: Manages the CMS portal login credentials (saved in the `cms_settings` table).
+  - `/admin/settings`: Manages system configuration including CMS/RTIS portal credentials and the `allow_manual_entry` toggle. Portal credentials are stored in the database (not environment variables) because Indian Railways forces a 6-month credential rotation and requires daily OTPs — admins must be able to update them without redeployment.
   - `/admin/reports`: Displays submission statistics, highlighting crews that have or have not entered BPC details in the last 30 days.
   - `/crew_list`: The primary monitor page. It executes a complex SQL `UNION` and `COALESCE` query to merge live scraped data (`crew_records`) with manual crew submissions (`crew_submissions`) and admin overrides (`admin_edits`). Priority logic: Admin Edit > Crew Submission > Scraped CMS Data.
 - **Internal APIs (Webhook for Scraper)**:
@@ -77,7 +77,7 @@ Located in `data/crew.db`. Uses SQLite.
 - **`admin_edits`**: A key-value table tracking manual overrides applied by the admin directly from the `crew_list` table UI.
 - **`booking_ta_crew`**: Stores scraped TA (Traveling Allowance) data such as mobile numbers and ordering times.
 - **`users` & `signup_passcodes`**: Authentication tables for the Admin portal.
-- **`cms_settings`**: Stores the encrypted/plaintext CMS login credentials used by `login.py`.
+- **`cms_settings`**: Stores configuration including the `allow_manual_entry` flag and portal credentials (`cms_username`, `cms_password`, `rtis_username`, `rtis_password`). While internal secrets (`SECRET_KEY`, `API_SECRET`, Google Vision credentials) are stored securely in environment variables, these external portal credentials must be stored in the database so admins can update them directly via the UI, as Indian Railways forces 6-month credential rotations.
 
 ---
 
@@ -85,11 +85,12 @@ Located in `data/crew.db`. Uses SQLite.
 
 ### The Scraping Cycle
 1. `app.py` thread executes `subprocess.Popen(['python', 'scraper/login.py'])`.
-2. `login.py` attempts to fetch data using saved cookies via headless requests.
-3. If the server responds with a login page (expired session), `login.py` launches a headless Chrome window, pulls credentials from the DB, solves the OCR CAPTCHA, and logs in.
-4. `login.py` performs POST requests to the CMS portal, scrapes the resulting HTML tables with `BeautifulSoup`, and pushes the JSON objects back to `http://localhost:5000/api/sync`.
-5. `app.py` receives the JSON, updates `crew_records`, and tracks missing crews.
-6. `login.py` saves the new session cookies to `data/cookies.json`, goes to sleep for 25-35 minutes, and repeats.
+2. `login.py` reads CMS credentials from the `cms_settings` table in the SQLite database (stored and managed via Admin → Settings UI).
+3. `login.py` attempts to fetch data using saved cookies via headless requests.
+4. If the server responds with a login page (expired session), `login.py` launches a headless Chrome window, uses the DB-provided credentials, solves the OCR CAPTCHA (via Google Vision API or ddddocr), and logs in.
+5. `login.py` performs POST requests to the CMS portal, scrapes the resulting HTML tables with `BeautifulSoup`, and pushes the JSON objects back to `http://localhost:5000/api/sync`.
+6. `app.py` receives the JSON, validates the `X-API-Secret` header using constant-time comparison, updates `crew_records`, and tracks missing crews.
+7. `login.py` saves the new session cookies to `data/cookies.json`, goes to sleep for 25-35 minutes, and repeats.
 
 ### The Crew List Render Cycle
 1. Admin visits `/crew_list`.

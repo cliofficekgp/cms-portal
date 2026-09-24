@@ -4,11 +4,21 @@ A Flask-based web application for real-time monitoring and management of locomot
 
 ---
 
+## ⚠️ CRITICAL DEPLOYMENT WARNING ⚠️
+
+**ROTATE ALL SECRETS BEFORE DEPLOYMENT.**
+
+This repository previously contained hardcoded credentials and service account keys in the source code and git history. **Removing them from the working tree does not remove them from git history.** 
+
+Any credential that was ever hardcoded (including the discovered Google Cloud service-account JSON, CMS/RTIS portal credentials, Flask SECRET_KEY, API_SECRET, default admin passwords, cookies, and SSH keys) is considered **COMPROMISED** and must be permanently revoked or rotated in the respective upstream service console before this application is deployed to an environment accessible from the internet.
+
+---
+
 ## Features
 
 - **Crew Form** — Crew self-service duty report with GPS location capture, Relief toggle, BPC / Loco / Train number entry, and CTO time.
 - **Crew List** — Live admin dashboard with search, CSV export, soft-delete (30-day retention), and ingest-miss highlighting.
-- **CMS Scraper** — Background Selenium scraper that syncs crew sign-on data from the Indian Railways CMS portal.
+- **CMS & RTIS Scrapers** — Background Selenium scrapers for CMS portal sync and RTIS live GPS locomotive tracking.
 - **BPC Report** — Monthly report of BPC compliance by crew ID.
 - **Admin Console** — Super-admin and multi-user admin access with role-based permissions and forced-password-change flow.
 - **Soft Delete** — Records are flagged and highlighted in red; hard delete runs automatically after 30 days.
@@ -37,7 +47,12 @@ venv\Scripts\activate          # Windows
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Start (Windows one-click)
+# 4. Configure Secrets (REQUIRED)
+cp .env.example .env
+# Edit .env to set SECRET_KEY, API_SECRET, BOOTSTRAP_ADMIN_* and portal credentials.
+# The app WILL NOT START if these are missing.
+
+# 5. Start (Windows one-click)
 start_dev.bat
 
 # OR manually:
@@ -46,28 +61,27 @@ python webapp/app.py
 
 Open http://localhost:5000
 
-**Default admin login:** `admin` / `Cms@123` — **change immediately in the Admin Settings page.**
-
 ---
 
 ## Production Deployment
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and fill in real values:
+Copy `.env.example` to `.env` and fill in real values. See `.env.example` for the full list of required variables, including:
 
 | Variable | Required | Description |
 |---|---|---|
-| `SECRET_KEY` | ✅ | Random 32-byte hex — run `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `SECRET_KEY` | ✅ | Random 32-byte hex for Flask sessions |
 | `API_SECRET` | ✅ | Shared secret between webapp and scraper |
-| `FLASK_ENV` | ✅ | Set to `production` |
-| `PORT` | — | Default `8080` |
-| `DB_PATH` | — | Absolute path to SQLite file. Default: `<project>/data/crew.db` |
+| `BOOTSTRAP_ADMIN_USERNAME` | ✅ | First-run admin username (ignored after creation) |
+| `BOOTSTRAP_ADMIN_PASSWORD` | ✅ | First-run admin password |
+| `GCP_CREDENTIALS_B64` | — | Base64-encoded Google Vision API service account JSON |
+
+> **Note on CMS/RTIS credentials:** These are **not** set via environment variables. After deployment, log in as admin and go to **Admin → Settings** to enter CMS username/password and RTIS username/password. Indian Railways forces a 6-month credential update cycle and requires a daily OTP — credentials are stored in the database so admins can update them without redeployment.
 
 ### Option A — Bare Metal / VM (Linux)
 
 ```bash
-# Set env vars, then:
 chmod +x start_prod.sh
 ./start_prod.sh
 ```
@@ -78,16 +92,16 @@ chmod +x start_prod.sh
 # Build
 docker build -t cms-portal .
 
-# Run (mount a volume for persistent DB)
+# Run (Mount .env file and data volume)
 docker run -d \
   --name cms-portal \
   -p 8080:8080 \
   -v cms_data:/app/data \
-  -e SECRET_KEY=your_secret_here \
-  -e API_SECRET=your_api_secret_here \
-  -e FLASK_ENV=production \
+  --env-file .env \
   cms-portal
 ```
+
+*(If using Coolify, inject the required secrets into the Environment Variables panel).*
 
 ### Reverse Proxy (Nginx example)
 
@@ -123,12 +137,14 @@ server {
 ```
 cms automate/
 ├── webapp/
-│   ├── app.py              # Flask application + all routes
+│   ├── app.py              # Flask application factory
+│   ├── routes/             # App Blueprints (crew, admin, api, etc.)
 │   ├── wsgi.py             # WSGI entry point for gunicorn
 │   ├── templates/          # Jinja2 HTML templates
 │   └── static/             # CSS / JS assets
 ├── scraper/
-│   └── login.py            # Selenium CMS scraper
+│   ├── login.py            # Selenium CMS scraper
+│   └── rtis_scraper.py     # RTIS Live Tracker scraper
 ├── data/                   # SQLite database (gitignored)
 ├── Dockerfile
 ├── gunicorn.conf.py        # Gunicorn production settings
@@ -143,10 +159,7 @@ cms automate/
 
 ## Database
 
-SQLite at `data/crew.db`. Two core tables:
-
-- **`crew_records`** — CMS-synced crew sign-on records (one row per crew per duty)
-- **`crew_submissions`** — Manual duty-form submissions from crew
+SQLite at `data/crew.db`. 
 
 Records are soft-deleted (remain visible, highlighted red). Hard delete runs automatically after **30 days** via a background thread.
 
@@ -154,7 +167,7 @@ Records are soft-deleted (remain visible, highlighted red). Hard delete runs aut
 
 ## Security Notes
 
-- Change the default `admin` / `Cms@123` credentials **immediately** after first login.
-- Set a strong `SECRET_KEY` (32+ random bytes) in production.
+- No secrets are stored in the database.
+- Provide all configuration via `.env` or system environment variables.
 - Serve behind HTTPS — `SESSION_COOKIE_SECURE=True` is auto-enabled when `FLASK_ENV=production`.
-- The `/api/sync` and `/api/scraper/*` endpoints are protected by `API_SECRET`.
+- The `/api/sync` and internal endpoints are protected by `API_SECRET` using constant-time comparison.

@@ -69,6 +69,22 @@
                     </svg>
                     Admin Users
                 </h3>
+
+                {% if temp_password %}
+                <div class="mb-5 p-4 rounded-xl" style="background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4)">
+                    <h4 class="text-yellow-400 font-bold text-sm mb-2">🔑 Password Reset Successful</h4>
+                    <p class="text-sm text-yellow-200 mb-3">Temporary password for <span class="font-bold text-white">{{ reset_username }}</span>:</p>
+                    <div class="flex items-center gap-3 p-3 rounded-lg" style="background: rgba(0,0,0,0.3)">
+                        <code id="temp-pw" class="text-lg text-green-400 font-mono tracking-wider flex-1">{{ temp_password }}</code>
+                        <button type="button" class="copy-btn text-gray-400 text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20"
+                                onclick="navigator.clipboard.writeText(document.getElementById('temp-pw').textContent.trim()); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1500)">
+                            Copy
+                        </button>
+                    </div>
+                    <p class="text-xs text-yellow-300 mt-2 font-semibold">⚠️ Copy this now — it will not be shown again. The user must change it on next login.</p>
+                </div>
+                {% endif %}
+
                 <div class="space-y-3">
                     {% for user in users %}
                     <div class="flex items-center justify-between p-3 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08)">

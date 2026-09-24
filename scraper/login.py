@@ -8,7 +8,10 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
-from google.cloud import vision
+try:
+    from google.cloud import vision
+except ImportError:
+    vision = None   # GCP Vision OCR is optional; ddddocr is the local fallback
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
@@ -108,24 +111,16 @@ if not GCP_CREDENTIALS:
         except: account_name = 'legacy_account'
         GCP_CREDENTIALS.append({'path': creds_path, 'name': account_name})
     else:
-        coolify_creds_path = os.path.join(BASE_DIR, 'scraper', 'gcp-creds.json')
-        if os.path.exists(coolify_creds_path):
-            try: 
-                with open(coolify_creds_path) as f: account_name = json.load(f).get('project_id', 'coolify_account')
-            except: account_name = 'coolify_account'
-            GCP_CREDENTIALS.append({'path': coolify_creds_path, 'name': account_name})
-        else:
-            default_path = os.path.join(BASE_DIR, 'scraper', 'algebraic-cycle-432817-r8-ae9fa17cac37.json')
-            try: 
-                with open(default_path) as f: account_name = json.load(f).get('project_id', 'default_account')
-            except: account_name = 'default_account'
-            GCP_CREDENTIALS.append({'path': default_path, 'name': account_name})
+        print("[CMS] WARNING: No GCP_CREDENTIALS_B64 or GCP_CREDENTIALS_B64_N environment variable set. "
+              "Google Vision OCR tier will be unavailable. CAPTCHA fallback will use ddddocr only.", flush=True)
 
 COOKIES_FILE = os.path.join(DATA_DIR, 'cookies.json')
 LAST_RUN_FILE = os.path.join(DATA_DIR, 'last_run.txt')
 
 FLASK_API_URL = f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api"
-API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
+API_SECRET = os.environ.get('API_SECRET')
+if not API_SECRET:
+    raise RuntimeError("FATAL: API_SECRET environment variable is not set. Scraper startup aborted.")
 
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 
@@ -220,13 +215,13 @@ def send_state_to_admin(status, message, action_required=False, action_type='', 
             payload['phone_number'] = phone_number
         if last_ddddocr_failure:
             payload['last_ddddocr_failure'] = last_ddddocr_failure
-        requests.post(f"{FLASK_API_URL}/scraper/state", json=payload, headers={'X-API-Secret': API_SECRET})
+        requests.post(f"{FLASK_API_URL}/scraper/state", json=payload, headers={'X-API-Secret': API_SECRET}, timeout=5)
     except Exception as e:
         print(f"Failed to communicate with Admin API: {e}")
 
 def get_admin_action():
     try:
-        resp = requests.get(f"{FLASK_API_URL}/scraper/action", headers={'X-API-Secret': API_SECRET})
+        resp = requests.get(f"{FLASK_API_URL}/scraper/action", headers={'X-API-Secret': API_SECRET}, timeout=5)
         if resp.status_code == 200:
             return resp.json().get('submitted_value')
     except Exception:
@@ -330,7 +325,7 @@ def sync_signon_reports(session_obj):
     # POST to Flask API
     send_state_to_admin('running', 'Syncing data to backend DB...')
     try:
-        resp = requests.post(f"{FLASK_API_URL}/sync", json=current_crew_map, headers={'X-API-Secret': API_SECRET})
+        resp = requests.post(f"{FLASK_API_URL}/sync", json=current_crew_map, headers={'X-API-Secret': API_SECRET}, timeout=30)
         if resp.status_code == 200:
             print("Successfully synced with Flask API")
             now = datetime.datetime.now(IST)
@@ -404,7 +399,7 @@ def sync_ta_reports(session_obj):
             
             if ta_records:
                 send_state_to_admin('running', 'Syncing TA data to backend DB...')
-                sync_resp = requests.post(f"{FLASK_API_URL}/sync_ta", json=ta_records, headers={'X-API-Secret': API_SECRET})
+                sync_resp = requests.post(f"{FLASK_API_URL}/sync_ta", json=ta_records, headers={'X-API-Secret': API_SECRET}, timeout=15)
                 if sync_resp.status_code == 200:
                     print(f"Successfully synced TA data for {len(ta_records)} crews")
                     return True
@@ -443,7 +438,7 @@ def main_loop():
     
     while True:
         current_date = datetime.datetime.now(IST).date()
-        if last_rotation_date != current_date:
+        if GCP_CREDENTIALS and vision and last_rotation_date != current_date:
             active_index = current_date.toordinal() % len(GCP_CREDENTIALS)
             active_cred = GCP_CREDENTIALS[active_index]
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = active_cred['path']
@@ -451,6 +446,10 @@ def main_loop():
             active_account_name = active_cred['name']
             last_rotation_date = current_date
             print(f"[{current_date}] Switched to OCR account: {active_account_name}")
+        elif not GCP_CREDENTIALS:
+            # Explicitly clear client if we don't have GCP config
+            active_client = None
+            active_account_name = None
 
         if check_stop_signal():
             print("Stop signal detected. Exiting scraper process gracefully.")
@@ -615,13 +614,13 @@ def main_loop():
                     except Exception as e:
                         print(f"ddddocr failed: {e}")
                 
-                if not result:
+                if not result and active_client and vision:
                     if consecutive_captcha_failures == 5 and ocr:
                         failure_time = datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
                         send_state_to_admin('running', f'ddddocr failed 5 times, falling back to Google Vision...', last_ddddocr_failure=failure_time)
                     else:
                         send_state_to_admin('running', f'Solving Captcha via OCR ({active_account_name})...')
-                        
+
                     image_v = vision.Image(content=img_data)
                     response = active_client.text_detection(image=image_v)
                     

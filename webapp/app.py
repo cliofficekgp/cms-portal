@@ -1,252 +1,69 @@
+"""
+Flask application factory for the CMS crew management system.
+
+Creates and configures the Flask app, registers blueprints, and starts background threads.
+"""
 import os
 import sys
-import json
+import time
 import sqlite3
 import threading
-import subprocess
-import csv
 from datetime import datetime, timedelta
-import _strptime  # Fix for known thread-safety bug with strptime lazily loading in python
-# Force initialization of the _strptime module
+from flask import Flask
+from werkzeug.security import generate_password_hash
+
+# Fix for known thread-safety bug with strptime lazily loading in Python
+import _strptime
 datetime.strptime("2020", "%Y")
-from zoneinfo import ZoneInfo
-from functools import wraps
-from werkzeug.security import generate_password_hash, check_password_hash
-import uuid
-import secrets
-import string
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
 
-app = Flask(__name__)
+# Guard: ensure background threads are started exactly once, even if create_app()
+# is called multiple times (e.g. wsgi.py import + explicit call, gunicorn on_starting).
+_threads_started = False
 
-# ---------------------------------------------------------------------------
-# Configuration (reads from environment; safe defaults for local dev only)
-# ---------------------------------------------------------------------------
-_is_prod = os.environ.get('FLASK_ENV', 'development').lower() == 'production'
-app.secret_key = os.environ.get('SECRET_KEY', 'kgp-crew-secret-2026-CHANGE-IN-PROD')
-app.config.update(
-    DEBUG=not _is_prod,
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Lax',
-    SESSION_COOKIE_SECURE=_is_prod,  # True only when served over HTTPS
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
-)
-API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
+# Load .env file early (before extensions import requires env vars)
+_env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+if os.path.exists(_env_file):
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _, _val = _line.partition('=')
+                os.environ.setdefault(_key.strip(), _val.strip())
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.environ.get('DB_PATH', os.path.join(BASE_DIR, 'data', 'crew.db'))
+from webapp.extensions import IST, BASE_DIR, DB_PATH, DB_WRITE_LOCK
+from webapp.database import get_db
 
-IST = ZoneInfo("Asia/Kolkata")
 
-# Serialize all SQLite write transactions across threads.
-# SQLite only allows one writer at a time; this lock ensures writers queue
-# in-process instead of hitting a 30-second busy_timeout and failing.
-DB_WRITE_LOCK = threading.Lock()
-
-def parse_dt(val):
-    if not val or val == '-': return None
-    val = val.strip().replace(' IST', '')
-    for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M', '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d',
-                '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%y %H:%M:%S', '%d/%m/%y %H:%M', '%d/%m/%Y', '%d/%m/%y']:
-        try:
-            dt = datetime.strptime(val, fmt)
-            return dt.replace(tzinfo=IST)
-        except ValueError:
-            pass
-    return None
-
-import math
-
-# Load stations on startup
-stations_list = []
-def load_stations():
-    global stations_list
-    stations_path = os.path.join(BASE_DIR, 'data', '01_station_code.csv')
+def recover_db_if_malformed(db_path):
+    """Attempt to recover a corrupted SQLite database via iterdump."""
     try:
-        import csv
-        with open(stations_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    lat = float(row['lat'])
-                    lon = float(row['long'])
-                    stations_list.append({
-                        'code': row['code'],
-                        'lat': lat,
-                        'lon': lon
-                    })
-                except (ValueError, KeyError):
-                    pass
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        res = conn.execute("PRAGMA integrity_check;").fetchone()
+        conn.close()
+        if res and res[0].lower() == 'ok':
+            return
+    except Exception:
+        pass
+
+    print("[DB] WARNING: Database is malformed! Attempting automated recovery via iterdump...")
+    import tempfile, shutil, time
+    try:
+        conn = sqlite3.connect(db_path)
+        dump_sql = ""
+        for line in conn.iterdump():
+            dump_sql += line + "\n"
+        conn.close()
+
+        backup_path = db_path + f".corrupted.{int(time.time())}"
+        shutil.move(db_path, backup_path)
+
+        conn2 = sqlite3.connect(db_path)
+        conn2.executescript(dump_sql)
+        conn2.close()
+        print(f"[DB] Recovery successful. Corrupted file backed up to {backup_path}")
     except Exception as e:
-        print(f"Failed to load stations: {e}")
+        print(f"[DB] Automated recovery failed: {e}")
 
-load_stations()
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
-def get_nearest_station(lat, lon):
-    if not stations_list:
-        return ""
-    nearest = min(stations_list, key=lambda s: haversine(lat, lon, s['lat'], s['lon']))
-    return nearest['code']
-
-# Global state for scraper
-scraper_state = {
-    'status': 'starting',
-    'message': 'Initializing background thread...',
-    'image_base64': '',
-    'action_required': False,
-    'action_type': '', # 'captcha' or 'otp'
-    'submitted_value': None,
-    'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST'),
-    'last_run': None,  # Timestamp of the last successful CMS sync
-    'active_tunnel': 'Unknown',
-    'last_ddddocr_failure': 'Never'
-}
-
-# Global state for RTIS scraper
-rtis_state = {
-    'status': 'starting',
-    'message': 'Initializing RTIS background thread...',
-    'image_base64': '',
-    'action_required': False,
-    'action_type': '', # 'captcha' or 'otp'
-    'submitted_value': None,
-    'last_updated': datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST'),
-    'last_run': None,  # Timestamp of the last successful RTIS sync
-    'active_tunnel': 'Unknown',
-    'last_ddddocr_failure': 'Never'
-}
-
-# ---------------------------------------------------------------------------
-# Background Scraper Thread
-# ---------------------------------------------------------------------------
-
-def run_scraper_thread():
-    scraper_script = os.path.join(BASE_DIR, 'scraper', 'login.py')
-    python_exe = sys.executable
-    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
-    fatal_file = os.path.join(BASE_DIR, 'data', 'fatal_error.txt')
-    
-    global scraper_process
-    scraper_process = None
-
-    while True:
-        try:
-            if os.path.exists(stop_file):
-                if scraper_state['status'] not in ['cancelled', 'error']:
-                    scraper_state['status'] = 'cancelled'
-                    scraper_state['message'] = 'Scraper is stopped.'
-                import time
-                time.sleep(2)
-                continue
-            
-            if os.path.exists(fatal_file):
-                if scraper_state['status'] not in ['cancelled', 'error']:
-                    scraper_state['status'] = 'error'
-                    with open(fatal_file, 'r') as f:
-                        scraper_state['message'] = f"Fatal Error: {f.read().strip()}. Please fix and trigger manually."
-                import time
-                time.sleep(2)
-                continue
-
-            print("[Thread] Starting scraper subprocess...")
-            scraper_state['status'] = 'running'
-            scraper_state['message'] = 'Scraper subprocess starting...'
-            scraper_process = subprocess.Popen([python_exe, scraper_script], cwd=os.path.join(BASE_DIR, 'scraper'))
-            
-            scraper_process.wait()
-            scraper_process = None
-
-            # Only sleep 30s and restart if it wasn't intentionally stopped
-            if not os.path.exists(stop_file) and not os.path.exists(fatal_file):
-                print("[Thread] Scraper subprocess exited. Restarting in 30 seconds...")
-                import time
-                for _ in range(15): # Check for stop condition during the 30s sleep
-                    if os.path.exists(stop_file) or os.path.exists(fatal_file):
-                        break
-                    time.sleep(2)
-        except Exception as e:
-            print(f"[Thread] Scraper thread exception: {e}")
-            import time
-            time.sleep(30)
-
-
-# ---------------------------------------------------------------------------
-# Background RTIS Thread
-# ---------------------------------------------------------------------------
-
-def run_rtis_thread():
-    rtis_script = os.path.join(BASE_DIR, 'scraper', 'rtis_scraper.py')
-    python_exe = sys.executable
-    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
-    fatal_file = os.path.join(BASE_DIR, 'data', 'rtis_fatal_error.txt')
-    
-    global rtis_process
-    rtis_process = None
-
-    while True:
-        try:
-            if os.path.exists(stop_file):
-                if rtis_state['status'] not in ['cancelled', 'error']:
-                    rtis_state['status'] = 'cancelled'
-                    rtis_state['message'] = 'RTIS Scraper is stopped.'
-                import time
-                time.sleep(2)
-                continue
-            
-            if os.path.exists(fatal_file):
-                if rtis_state['status'] not in ['cancelled', 'error']:
-                    rtis_state['status'] = 'error'
-                    with open(fatal_file, 'r') as f:
-                        rtis_state['message'] = f"Fatal Error: {f.read().strip()}. Please fix and trigger manually."
-                import time
-                time.sleep(2)
-                continue
-
-            print("[Thread] Starting RTIS scraper subprocess...")
-            rtis_state['status'] = 'running'
-            rtis_state['message'] = 'RTIS Scraper subprocess starting...'
-            rtis_process = subprocess.Popen([python_exe, rtis_script], cwd=os.path.join(BASE_DIR, 'scraper'))
-            
-            rtis_process.wait()
-            rtis_process = None
-
-            # Only sleep 30s and restart if it wasn't intentionally stopped
-            if not os.path.exists(stop_file) and not os.path.exists(fatal_file):
-                print("[Thread] RTIS Scraper subprocess exited. Restarting in 30 seconds...")
-                import time
-                for _ in range(15): # Check for stop condition during the 30s sleep
-                    if os.path.exists(stop_file) or os.path.exists(fatal_file):
-                        break
-                    time.sleep(2)
-        except Exception as e:
-            print(f"[Thread] RTIS Scraper thread exception: {e}")
-            import time
-            time.sleep(30)
-
-
-# ---------------------------------------------------------------------------
-# Database helpers
-# ---------------------------------------------------------------------------
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=20.0)
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA busy_timeout=30000;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-    except sqlite3.OperationalError as e:
-        print(f"[DB] PRAGMA setup warning: {e}")
-    return conn
 
 def _recover_wal_if_needed():
     """On startup, checkpoint and clean up any leftover WAL files to prevent disk I/O errors."""
@@ -269,42 +86,14 @@ def _recover_wal_if_needed():
             os.remove(shm_path)
         except: pass
 
-def recover_db_if_malformed(db_path):
-    try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
-        res = conn.execute("PRAGMA integrity_check;").fetchone()
-        conn.close()
-        if res and res[0].lower() == 'ok':
-            return
-    except Exception:
-        pass
-        
-    print("[DB] WARNING: Database is malformed! Attempting automated recovery via iterdump...")
-    import tempfile, shutil, time
-    try:
-        conn = sqlite3.connect(db_path)
-        dump_sql = ""
-        for line in conn.iterdump():
-            dump_sql += line + "\n"
-        conn.close()
-        
-        backup_path = db_path + f".corrupted.{int(time.time())}"
-        shutil.move(db_path, backup_path)
-        
-        conn2 = sqlite3.connect(db_path)
-        conn2.executescript(dump_sql)
-        conn2.close()
-        print(f"[DB] Recovery successful. Corrupted file backed up to {backup_path}")
-    except Exception as e:
-        print(f"[DB] Automated recovery failed: {e}")
 
 def init_db():
+    """Initialize database with production schema and migrations."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     recover_db_if_malformed(DB_PATH)
     _recover_wal_if_needed()
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS crew_records (
@@ -330,12 +119,12 @@ def init_db():
     try:
         cur.execute('ALTER TABLE crew_records ADD COLUMN found_in_ns TEXT DEFAULT "no"')
     except sqlite3.OperationalError:
-        pass # Column likely already exists
-        
+        pass
+
     try:
         cur.execute('ALTER TABLE crew_records ADD COLUMN is_active INTEGER DEFAULT 1')
     except sqlite3.OperationalError:
-        pass # Column likely already exists
+        pass
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS crew_submissions (
@@ -360,6 +149,7 @@ def init_db():
             handover_crew_id TEXT
         )
     ''')
+
     # Migrations for new columns (safe: each ALTER is caught if column already exists)
     for col_def in [
         'is_relief INTEGER DEFAULT 0',
@@ -373,8 +163,8 @@ def init_db():
         try:
             cur.execute(f'ALTER TABLE crew_submissions ADD COLUMN {col_def}')
         except sqlite3.OperationalError:
-            pass # Column already exists
-            
+            pass
+
     cur.execute('''
         CREATE TABLE IF NOT EXISTS booking_ta_crew (
             crew_id       TEXT PRIMARY KEY,
@@ -396,12 +186,13 @@ def init_db():
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS cms_settings (
-            id                  INTEGER PRIMARY KEY,
+            id                  INTEGER PRIMARY KEY CHECK (id = 1),
             cms_username        TEXT,
             cms_password        TEXT,
-            allow_manual_entry  INTEGER DEFAULT 1,
-            rtis_username       TEXT DEFAULT '',
-            rtis_password       TEXT DEFAULT ''
+            rtis_username       TEXT,
+            rtis_password       TEXT,
+            allow_manual_entry  INTEGER DEFAULT 0,
+            updated_at          TEXT
         )
     ''')
 
@@ -409,22 +200,30 @@ def init_db():
     try:
         cur.execute('ALTER TABLE cms_settings ADD COLUMN allow_manual_entry INTEGER DEFAULT 1')
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass
 
     # Migration: add rtis columns to existing DBs
     try:
         cur.execute("ALTER TABLE cms_settings ADD COLUMN rtis_username TEXT DEFAULT ''")
         cur.execute("ALTER TABLE cms_settings ADD COLUMN rtis_password TEXT DEFAULT ''")
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass
 
+    # Migration: add updated_at column to existing DBs
+    try:
+        cur.execute("ALTER TABLE cms_settings ADD COLUMN updated_at TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     row_count = cur.execute('SELECT COUNT(*) FROM cms_settings').fetchone()[0]
     if row_count == 0:
         cur.execute(
-            'INSERT INTO cms_settings (id, cms_username, cms_password, allow_manual_entry) VALUES (1, ?, ?, 1)',
-            ('KGPCLIHQ', 'Cms@852')
+            'INSERT INTO cms_settings (id, allow_manual_entry) VALUES (1, 0)'
         )
+    else:
+        # For existing deployments, keep existing credentials (they're stored in DB for admin updates)
+        # No-op - credentials remain as-is in the database
+        pass
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -482,7 +281,7 @@ def init_db():
     cur.execute('CREATE INDEX IF NOT EXISTS idx_duty_log_crew_id ON crew_duty_log (crew_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_duty_log_sign_on ON crew_duty_log (sign_on_time)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_submissions_crew_id ON crew_submissions (crew_id)')
-    
+
     cur.execute('''
         CREATE TABLE IF NOT EXISTS ocr_usage_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -492,85 +291,106 @@ def init_db():
             UNIQUE(account_name, usage_date)
         )
     ''')
-    
-    # Bootstrap default super_admin if no users exist
+
+    # Bootstrap default super_admin if no users exist (secure first-run only)
     user_count = cur.execute('SELECT COUNT(*) FROM users').fetchone()[0]
     if user_count == 0:
-        default_hash = generate_password_hash('Cms@123')
-        cur.execute('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', 
-                    ('admin', default_hash, 'super_admin'))
+        bootstrap_user = os.environ.get('BOOTSTRAP_ADMIN_USERNAME')
+        bootstrap_pass = os.environ.get('BOOTSTRAP_ADMIN_PASSWORD')
+        if not bootstrap_user or not bootstrap_pass:
+            raise RuntimeError(
+                "No administrator exists and first-run bootstrap credentials are missing. "
+                "Set BOOTSTRAP_ADMIN_USERNAME and BOOTSTRAP_ADMIN_PASSWORD environment variables."
+            )
+        if len(bootstrap_pass) < 6:
+            raise RuntimeError("Bootstrap admin password must be at least 6 characters.")
+        bootstrap_hash = generate_password_hash(bootstrap_pass)
+        cur.execute('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+                    (bootstrap_user, bootstrap_hash, 'super_admin'))
 
     conn.commit()
     conn.close()
 
 
-# (threads are started after get_db/init_db are defined below)
-
-# ---------------------------------------------------------------------------
-# Cleanup Thread (Hard Delete > 1 Month)
-# ---------------------------------------------------------------------------
-
 def run_cleanup_thread():
-    BATCH_SIZE = 500  # Delete in chunks to keep transactions short
+    """Hourly cleanup thread to hard-delete data older than 30 days."""
+    # Delay startup so scrapers can complete their first sync cycle without lock contention
+    time.sleep(180)
+
+    BATCH_SIZE = 500
     while True:
         conn = None
         try:
             print("[Thread] Running cleanup job...")
-            with DB_WRITE_LOCK:
-                conn = get_db()
-                cutoff = datetime.now(IST) - timedelta(days=30)
-                
-                # Clean crew_submissions older than 30 days (batched)
-                subs = conn.execute('SELECT id, sign_on_time FROM crew_submissions').fetchall()
-                stale_sub_ids = []
-                for row in subs:
-                    try:
-                        dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
-                        if dt < cutoff:
-                            stale_sub_ids.append(row['id'])
-                    except: pass
-                for i in range(0, len(stale_sub_ids), BATCH_SIZE):
-                    batch = stale_sub_ids[i:i+BATCH_SIZE]
-                    placeholders = ','.join('?' * len(batch))
-                    conn.execute(f'DELETE FROM crew_submissions WHERE id IN ({placeholders})', batch)
-                
-                # Clean crew_records: only hard-delete soft-deleted rows older than 30 days (batched)
-                recs = conn.execute('SELECT crew_id, sign_on_time, is_active FROM crew_records').fetchall()
-                stale_rec_ids = []
-                for row in recs:
-                    if row['is_active'] == 1:
-                        continue
-                    try:
-                        dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
-                        if dt < cutoff:
-                            stale_rec_ids.append(row['crew_id'])
-                    except: pass
-                for i in range(0, len(stale_rec_ids), BATCH_SIZE):
-                    batch = stale_rec_ids[i:i+BATCH_SIZE]
-                    placeholders = ','.join('?' * len(batch))
-                    conn.execute(f'DELETE FROM crew_records WHERE crew_id IN ({placeholders})', batch)
-                
-                # Clean crew_duty_log entries older than 30 days (batched)
-                logs = conn.execute('SELECT id, sign_on_time FROM crew_duty_log').fetchall()
-                stale_log_ids = []
-                for row in logs:
-                    try:
-                        dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
-                        if dt < cutoff:
-                            stale_log_ids.append(row['id'])
-                    except: pass
-                for i in range(0, len(stale_log_ids), BATCH_SIZE):
-                    batch = stale_log_ids[i:i+BATCH_SIZE]
-                    placeholders = ','.join('?' * len(batch))
-                    conn.execute(f'DELETE FROM crew_duty_log WHERE id IN ({placeholders})', batch)
-                
-                conn.commit()
+            conn = get_db()
+            cutoff = datetime.now(IST) - timedelta(days=30)
+
+            # --- Read phase (no lock needed) ---
+            # Find stale crew_submissions
+            subs = conn.execute('SELECT id, sign_on_time FROM crew_submissions').fetchall()
+            stale_sub_ids = []
+            for row in subs:
+                try:
+                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
+                    if dt < cutoff:
+                        stale_sub_ids.append(row['id'])
+                except: pass
+
+            # Find stale inactive crew_records
+            recs = conn.execute('SELECT crew_id, sign_on_time, is_active FROM crew_records').fetchall()
+            stale_rec_ids = []
+            for row in recs:
+                if row['is_active'] == 1:
+                    continue
+                try:
+                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
+                    if dt < cutoff:
+                        stale_rec_ids.append(row['crew_id'])
+                except: pass
+
+            # Find stale duty log entries
+            logs = conn.execute('SELECT id, sign_on_time FROM crew_duty_log').fetchall()
+            stale_log_ids = []
+            for row in logs:
+                try:
+                    dt = datetime.strptime(row['sign_on_time'], '%d-%m-%Y %H:%M')
+                    if dt < cutoff:
+                        stale_log_ids.append(row['id'])
+                except: pass
+
+            # --- Write phase (lock per batch, released between batches) ---
+            total_batches = max(len(stale_sub_ids), len(stale_rec_ids), len(stale_log_ids), 1)
+            for i in range(0, total_batches, BATCH_SIZE):
+                with DB_WRITE_LOCK:
+                    sub_batch = stale_sub_ids[i:i+BATCH_SIZE]
+                    if sub_batch:
+                        placeholders = ','.join('?' * len(sub_batch))
+                        conn.execute(f'DELETE FROM crew_submissions WHERE id IN ({placeholders})', sub_batch)
+
+                    rec_batch = stale_rec_ids[i:i+BATCH_SIZE]
+                    if rec_batch:
+                        placeholders = ','.join('?' * len(rec_batch))
+                        conn.execute(f'DELETE FROM crew_records WHERE crew_id IN ({placeholders})', rec_batch)
+
+                    log_batch = stale_log_ids[i:i+BATCH_SIZE]
+                    if log_batch:
+                        placeholders = ','.join('?' * len(log_batch))
+                        conn.execute(f'DELETE FROM crew_duty_log WHERE id IN ({placeholders})', log_batch)
+
+                    conn.commit()
+                # Lock released between batches — other threads can write
+                time.sleep(0.1)
+
+            if stale_sub_ids or stale_rec_ids or stale_log_ids:
+                print(f"[Thread] Cleanup done: {len(stale_sub_ids)} subs, {len(stale_rec_ids)} records, {len(stale_log_ids)} logs deleted.")
+            else:
+                print("[Thread] Cleanup: nothing to delete.")
+
         except Exception as e:
             if isinstance(e, sqlite3.OperationalError):
                 err_msg = str(e).lower()
                 if "disk i/o error" in err_msg or "database is locked" in err_msg or "readonly" in err_msg:
                     print(f"CRITICAL: DB I/O Error detected in cleanup thread ({e}). Force restarting container...", flush=True)
-                    import os
                     os._exit(1)
             print(f"[Thread] Cleanup thread exception: {e}")
         finally:
@@ -578,2257 +398,75 @@ def run_cleanup_thread():
                 try:
                     conn.close()
                 except: pass
-        import time
-        time.sleep(3600) # Run every hour
-
-# (cleanup thread started after get_db is defined below)
+        time.sleep(3600)
 
 
-# ---------------------------------------------------------------------------
-# Start background threads (here so get_db/init_db are already defined)
-# ---------------------------------------------------------------------------
-if not os.environ.get("WERKZEUG_RUN_MAIN"):
-    import threading
-    scraper_thread = threading.Thread(target=run_scraper_thread, daemon=True)
-    scraper_thread.start()
-    
-    rtis_thread = threading.Thread(target=run_rtis_thread, daemon=True)
-    rtis_thread.start()
+def create_app():
+    """Flask application factory."""
+    app = Flask(__name__)
 
-    cleanup_thread = threading.Thread(target=run_cleanup_thread, daemon=True)
-    cleanup_thread.start()
+    # Configuration (reads from environment; safe defaults for local dev only)
+    _is_prod = os.environ.get('FLASK_ENV', 'development').lower() == 'production'
+    app.secret_key = os.environ.get('SECRET_KEY')
+    if not app.secret_key:
+        raise RuntimeError("FATAL: SECRET_KEY environment variable is not set. Startup aborted.")
+    app.config.update(
+        DEBUG=not _is_prod,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        SESSION_COOKIE_SECURE=_is_prod,
+        PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    )
 
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('admin_login'))
-        if session.get('force_password_change') and request.endpoint != 'admin_change_password':
-            return redirect(url_for('admin_change_password'))
-        return f(*args, **kwargs)
-    return decorated_function
+    # Initialize database
+    init_db()
 
-def super_admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('admin_login'))
-        if session.get('role') != 'super_admin':
-            return "Unauthorized. Super Admin access required.", 403
-        if session.get('force_password_change') and request.endpoint != 'admin_change_password':
-            return redirect(url_for('admin_change_password'))
-        return f(*args, **kwargs)
-    return decorated_function
+    # Register blueprints
+    from webapp.routes.auth import auth_bp
+    from webapp.routes.crew import crew_bp
+    from webapp.routes.admin import admin_bp
+    from webapp.routes.api_internal import api_internal_bp
+    from webapp.routes.api_public import api_public_bp
 
-def parse_sign_on_dt(s):
-    if not s or s == '-': return None
-    for fmt in ('%d-%m-%Y %H:%M', '%Y-%m-%d %H:%M', '%d/%m/%y %H:%M'):
-        try:
-            return datetime.strptime(s.strip(), fmt)
-        except ValueError:
-            pass
-    return None
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(crew_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(api_internal_bp)
+    app.register_blueprint(api_public_bp)
 
-def sign_on_match(existing_dt_str, incoming_dt_str, tolerance_minutes=60):
-    existing = parse_sign_on_dt(existing_dt_str)
-    incoming = parse_sign_on_dt(incoming_dt_str)
-    if existing is None or incoming is None: return False
-    return abs((existing - incoming).total_seconds()) <= tolerance_minutes * 60
-
-def archive_to_duty_log(conn, crew_id, has_submission=None):
-    """Archive the current crew_records row for a crew_id into crew_duty_log.
-    
-    If has_submission is None, auto-detect by checking crew_submissions table.
-    Call this BEFORE overwriting or soft-deleting a crew_records row.
-    """
-    rec = conn.execute(
-        'SELECT crew_id, name, desig, from_sttn, sign_on_time, sign_off_time, duty_hrs, category FROM crew_records WHERE crew_id = ?',
-        (crew_id,)
-    ).fetchone()
-    if not rec:
-        return
-    
-    if has_submission is None:
-        sub = conn.execute('SELECT id FROM crew_submissions WHERE crew_id = ?', (crew_id,)).fetchone()
-        has_submission = 1 if sub else 0
-    
-    # Avoid duplicate log entries for the exact same duty (same crew_id + sign_on_time)
-    sign_on = rec['sign_on_time'] or ''
-    if sign_on:
-        dup = conn.execute(
-            'SELECT id FROM crew_duty_log WHERE crew_id = ? AND sign_on_time = ?',
-            (crew_id, sign_on)
-        ).fetchone()
-        if dup:
-            # Update the has_submission flag in case it changed
-            if has_submission:
-                conn.execute(
-                    'UPDATE crew_duty_log SET has_submission = 1 WHERE id = ?',
-                    (dup['id'],)
-                )
-            return
-
-    created_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-    conn.execute('''
-        INSERT INTO crew_duty_log
-            (crew_id, name, desig, from_sttn, sign_on_time, sign_off_time, duty_hrs, category, has_submission, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        rec['crew_id'], rec['name'], rec['desig'], rec['from_sttn'],
-        rec['sign_on_time'], rec['sign_off_time'], rec['duty_hrs'],
-        rec['category'], has_submission, created_at
-    ))
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-@app.errorhandler(Exception)
-def handle_global_error(e):
-    if isinstance(e, sqlite3.OperationalError):
+    # Global error handler for SQLite disk I/O errors
+    @app.errorhandler(sqlite3.OperationalError)
+    def handle_db_error(e):
         err_msg = str(e).lower()
-        if "disk i/o error" in err_msg or "database is locked" in err_msg or "readonly" in err_msg:
-            print(f"CRITICAL: DB I/O Error detected ({e}). Force restarting container...", flush=True)
-            # os._exit(1) exits the process immediately with an error code,
-            # triggering Docker/Coolify's auto-restart policy to recover the server.
-            import os
+        if "disk i/o error" in err_msg or "readonly" in err_msg:
+            print(f"CRITICAL: SQLite I/O Error detected. Force restarting container...", flush=True)
             os._exit(1)
-            
-    # Pass through HTTP errors (like 404 Not Found)
-    try:
-        from werkzeug.exceptions import HTTPException
-        if isinstance(e, HTTPException):
-            return e
-    except ImportError:
-        pass
+        # Return generic error message to client, log full error internally
+        print(f"Database error: {e}", flush=True)
+        return "Internal server error", 500
 
-    # Log and return 500 for other unexpected errors
-    print(f"Unhandled Exception: {e}", flush=True)
-    return "Internal Server Error", 500
+    # Start background threads exactly once (guard against duplicate create_app calls
+    # from wsgi.py import + explicit call, or gunicorn on_starting hook).
+    # Also skip in Werkzeug reloader child process.
+    global _threads_started
+    if not _threads_started and not os.environ.get("WERKZEUG_RUN_MAIN"):
+        _threads_started = True
+        from webapp.threads import run_scraper_thread, run_rtis_thread
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+        scraper_thread = threading.Thread(target=run_scraper_thread, daemon=True)
+        scraper_thread.start()
 
-@app.route('/crew_login', methods=['GET', 'POST'])
-def crew_login():
-    if request.method == 'POST':
-        crew_id = request.form.get('crew_id', '').strip().upper()
-        if not crew_id:
-            return render_template('login.html', error='Please enter a Crew ID.')
+        rtis_thread = threading.Thread(target=run_rtis_thread, daemon=True)
+        rtis_thread.start()
 
-        conn = get_db()
-        row = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
+        cleanup_thread = threading.Thread(target=run_cleanup_thread, daemon=True)
+        cleanup_thread.start()
 
-        # If crew is not in CMS records, check if admin allows manual entry
-        if not row:
-            settings = conn.execute(
-                'SELECT allow_manual_entry FROM cms_settings WHERE id = 1'
-            ).fetchone()
-            conn.close()
-            allow_manual = settings['allow_manual_entry'] if settings else 1
-            if not allow_manual:
-                return render_template(
-                    'login.html',
-                    error=(
-                        'Your Crew ID is not registered in the system. '
-                        'Manual entry is currently disabled. '
-                        'Please contact the admin.'
-                    )
-                )
-            # Manual entry allowed by admin — proceed to blank form
-            session['crew_id'] = crew_id
-            return redirect(url_for('form', manual='1'))
+    return app
 
-        conn.close()
-        session['crew_id'] = crew_id
-        return redirect(url_for('form'))
-    return render_template('login.html')
 
-@app.route('/form')
-def form():
-    crew_id = session.get('crew_id')
-    if not crew_id:
-        return redirect(url_for('crew_login'))
-        
-    manual = request.args.get('manual', '0') == '1'
-
-    conn = get_db()
-    row = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
-    crew_data = dict(row) if row else {}
-    if manual:
-        for k in list(crew_data.keys()):
-            if k not in ['crew_id', 'name', 'desig']:
-                crew_data[k] = ''
-    else:
-        # Fetch latest submission to override/populate form fields
-        sub = conn.execute('SELECT * FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1', (crew_id,)).fetchone()
-        sub_dict = {}
-        if sub:
-            sub_dict = dict(sub)
-            if sign_on_match(crew_data.get('sign_on_time'), sub_dict.get('sign_on_time')):
-                # Override with manual submission data if present
-                for field in ['loco_no', 'train_no', 'bpc_no', 'to_sttn', 'cto_time', 'current_location', 'departure_time', 'relief_datetime']:
-                    if sub_dict.get(field):
-                        crew_data[field] = sub_dict[field]
-            else:
-                sub = None
-                sub_dict = {}
-
-        # Fetch admin edits to override both CMS records and crew submissions
-        admin_edits = conn.execute('SELECT field, value, updated_at FROM admin_edits WHERE crew_id = ?', (crew_id,)).fetchall()
-        
-        sub_dt = None
-        if sub and sub_dict.get('submitted_at'):
-            sub_dt = parse_dt(sub_dict['submitted_at'])
-            
-        sign_on_dt = parse_dt(crew_data.get('sign_on_time'))
-            
-        for edit in admin_edits:
-            if edit['value'] is not None and edit['value'].strip() != '':
-                admin_dt = parse_dt(edit['updated_at'])
-                # Ignore admin edits that happened before this duty started
-                if sign_on_dt and admin_dt and admin_dt < sign_on_dt:
-                    continue
-                
-                if edit['field'] == 'current_location':
-                    # Only override current_location if admin edit is newer than latest submission
-                    if not sub_dt or (admin_dt and admin_dt >= sub_dt):
-                        crew_data[edit['field']] = edit['value']
-                else:
-                    crew_data[edit['field']] = edit['value']
-                
-    # Format sign_on_time for display in form (readonly field)
-    if crew_data.get('sign_on_time') and crew_data['sign_on_time'] != '-':
-        dt = parse_dt(crew_data['sign_on_time'])
-        if dt:
-            crew_data['sign_on_time'] = dt.strftime('%d/%m/%y %H:%M')
-
-    # Parse CTO date and time for HTML inputs
-    if crew_data.get('cto_time') and crew_data['cto_time'] != '-':
-        dt = parse_dt(crew_data['cto_time'])
-        if dt:
-            crew_data['cto_date_val'] = dt.strftime('%Y-%m-%d')
-            crew_data['cto_time_val'] = dt.strftime('%H:%M')
-
-    if crew_data.get('departure_time') and crew_data['departure_time'] != '-':
-        dt = parse_dt(crew_data['departure_time'])
-        if dt:
-            crew_data['departure_date_val'] = dt.strftime('%Y-%m-%d')
-            crew_data['departure_time_val'] = dt.strftime('%H:%M')
-            
-    if crew_data.get('relief_datetime') and crew_data['relief_datetime'] != '-':
-        dt = parse_dt(crew_data['relief_datetime'])
-        if dt:
-            crew_data['relief_date_val'] = dt.strftime('%Y-%m-%d')
-            crew_data['relief_time_val'] = dt.strftime('%H:%M')
-
-    conn.close()
-
-    return render_template('form.html', crew_id=crew_id, crew=crew_data, manual=manual)
-
-@app.route('/submit', methods=['POST'])
-def submit():
-    data = request.form
-
-    crew_id       = data.get('crew_id', '').strip().upper()
-    name          = data.get('name', '').strip()
-    desig         = data.get('desig', '').strip()
-    sign_on_time  = data.get('sign_on_time', '').strip()
-    from_sttn     = data.get('from_sttn', '').strip().upper()
-    to_sttn       = data.get('to_sttn', '').strip().upper()
-    loco_no       = data.get('loco_no', '').strip()
-    train_no      = data.get('train_no', '').strip()
-    bpc_no        = data.get('bpc_no', '').strip()
-    current_loc   = data.get('current_location', '').strip().upper()
-    cto_date      = data.get('cto_date', '').strip()
-    cto_time_val  = data.get('cto_time', '').strip()
-    is_relief     = 1 if data.get('is_relief') == '1' else 0
-    relief_stn    = data.get('relief_station', '').strip().upper()
-    relief_dt     = data.get('relief_datetime', '').strip()
-    handover_id   = data.get('handover_crew_id', '').strip().upper()
-
-    departure_date= data.get('departure_date', '').strip()
-    departure_time_val = data.get('departure_time', '').strip()
-
-    if cto_date and cto_time_val:
-        try:
-            parsed_date = datetime.strptime(cto_date, '%Y-%m-%d').strftime('%d-%m-%Y')
-            cto_time = f"{parsed_date} {cto_time_val}"
-        except:
-            cto_time = f"{cto_date} {cto_time_val}"
-    else:
-        cto_time = ''
-        
-    if departure_date and departure_time_val:
-        try:
-            parsed_d_date = datetime.strptime(departure_date, '%Y-%m-%d').strftime('%d-%m-%Y')
-            departure_time = f"{parsed_d_date} {departure_time_val}"
-        except:
-            departure_time = f"{departure_date} {departure_time_val}"
-    else:
-        departure_time = ''
-
-    submitted_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-
-    conn = get_db()
-    conn.execute('''
-        INSERT INTO crew_submissions
-            (crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
-             loco_no, train_no, bpc_no, current_location, cto_time,
-             duty_hrs, sign_off_time, submitted_at,
-             is_relief, relief_station, relief_datetime, handover_crew_id, departure_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
-        loco_no, train_no, bpc_no, current_loc, cto_time,
-        '', '-', submitted_at,
-        is_relief, relief_stn, relief_dt, handover_id, departure_time
-    ))
-
-    existing = conn.execute('SELECT crew_id FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
-    if not existing:
-        conn.execute('''
-            INSERT OR IGNORE INTO crew_records
-                (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
-                 sign_off_time, duty_hrs, route, loco_no, train_no,
-                 category, manually_edited, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
-            '-', '', '', loco_no, train_no,
-            'MANUAL', 1, submitted_at
-        ))
-
-    # --- Handover Auto-Save for relief crew B ---
-    if is_relief and handover_id:
-        # Inherit loco, train, bpc from current crew's latest submission
-        # from_sttn is NOT changed (kept from crew B's own CMS record)
-        existing_b = conn.execute(
-            'SELECT * FROM crew_records WHERE crew_id = ?', (handover_id,)
-        ).fetchone()
-        # Check if crew B already has a submission for the same duty
-        existing_b_sub = conn.execute(
-            'SELECT id FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1',
-            (handover_id,)
-        ).fetchone()
-
-        handover_from = dict(existing_b)['from_sttn'] if existing_b else ''
-        handover_sign_on = dict(existing_b)['sign_on_time'] if existing_b else ''
-        handover_name = dict(existing_b)['name'] if existing_b else ''
-        handover_desig = dict(existing_b)['desig'] if existing_b else ''
-
-        conn.execute('''
-            INSERT INTO crew_submissions
-                (crew_id, name, desig, sign_on_time, from_sttn, to_sttn,
-                 loco_no, train_no, bpc_no, current_location, cto_time,
-                 duty_hrs, sign_off_time, submitted_at,
-                 is_relief, relief_station, relief_datetime, handover_crew_id, departure_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            handover_id, handover_name, handover_desig,
-            handover_sign_on,
-            handover_from,  # from_sttn NOT changed
-            to_sttn,
-            loco_no, train_no, bpc_no,
-            relief_stn,   # incoming crew starts at relief station
-            relief_dt,    # their CTO time = relief time
-            '', '-', submitted_at,
-            0, '', '', crew_id, ''
-        ))
-
-        # Ensure crew B exists in crew_records
-        if not existing_b:
-            conn.execute('''
-                INSERT OR IGNORE INTO crew_records
-                    (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
-                     sign_off_time, duty_hrs, route, loco_no, train_no,
-                     category, manually_edited, synced_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                handover_id, '', '', '', '', to_sttn,
-                '-', '', '', loco_no, train_no,
-                'MANUAL', 1, submitted_at
-            ))
-
-    # Mark crew_duty_log entry as has_submission for both this crew and the handover crew
-    archive_to_duty_log(conn, crew_id, has_submission=1)
-    if is_relief and handover_id:
-        archive_to_duty_log(conn, handover_id, has_submission=1)
-
-    conn.commit()
-    conn.close()
-
-    return render_template('success.html', crew_id=crew_id)
-
-
-# ---------------------------------------------------------------------------
-# Auth Routes
-# ---------------------------------------------------------------------------
-
-@app.route('/admin/login', methods=['GET', 'POST'])
-def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        
-        conn = get_db()
-        user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-        conn.close()
-        
-        if user and check_password_hash(user['password_hash'], password):
-            session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['role'] = user['role']
-            session['force_password_change'] = user['force_password_change']
-            
-            if user['force_password_change']:
-                return redirect(url_for('admin_change_password'))
-            
-            if user['role'] == 'super_admin':
-                return redirect(url_for('super_admin'))
-            return redirect(url_for('admin'))
-        
-        return render_template('admin_login.html', error='Invalid username or password')
-    return render_template('admin_login.html')
-
-@app.route('/admin/logout')
-def admin_logout():
-    session.clear()
-    return redirect(url_for('admin_login'))
-
-@app.route('/admin/change_password', methods=['GET', 'POST'])
-@login_required
-def admin_change_password():
-    if request.method == 'POST':
-        new_password = request.form.get('new_password')
-        if len(new_password) < 6:
-            return render_template('admin_change_password.html', error='Password must be at least 6 characters')
-            
-        hashed = generate_password_hash(new_password)
-        conn = get_db()
-        conn.execute('UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?', 
-                     (hashed, session['user_id']))
-        conn.commit()
-        conn.close()
-        
-        session['force_password_change'] = 0
-        if session.get('role') == 'super_admin':
-            return redirect(url_for('super_admin'))
-        return redirect(url_for('admin'))
-        
-    return render_template('admin_change_password.html')
-
-@app.route('/admin/forgot_password', methods=['GET', 'POST'])
-def admin_forgot_password():
-    if request.method == 'POST':
-        step = request.form.get('step')
-        username = request.form.get('username')
-        
-        conn = get_db()
-        user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-        
-        if not user:
-            conn.close()
-            return render_template('admin_forgot.html', error='User not found')
-            
-        if step == '1':
-            conn.close()
-            return render_template('admin_forgot.html', step='2', username=username, question=user['secret_question'])
-            
-        if step == '2':
-            answer = request.form.get('answer', '').strip().lower()
-            if check_password_hash(user['secret_answer_hash'], answer):
-                conn.close()
-                return render_template('admin_forgot.html', step='3', username=username)
-            conn.close()
-            return render_template('admin_forgot.html', step='2', username=username, question=user['secret_question'], error='Incorrect answer')
-            
-        if step == '3':
-            new_password = request.form.get('new_password')
-            hashed = generate_password_hash(new_password)
-            conn.execute('UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?', (hashed, user['id']))
-            conn.commit()
-            conn.close()
-            return redirect(url_for('admin_login'))
-            
-    return render_template('admin_forgot.html', step='1')
-
-@app.route('/admin/signup', methods=['GET', 'POST'])
-def admin_signup():
-    if request.method == 'POST':
-        passcode = request.form.get('passcode')
-        username = request.form.get('username')
-        password = request.form.get('password')
-        question = request.form.get('secret_question')
-        answer = request.form.get('secret_answer', '').strip().lower()
-        
-        conn = get_db()
-        pc_row = conn.execute('SELECT * FROM signup_passcodes WHERE passcode = ? AND is_used = 0', (passcode,)).fetchone()
-        if not pc_row:
-            conn.close()
-            return render_template('admin_signup.html', error='Invalid or used passcode.')
-            
-        if conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone():
-            conn.close()
-            return render_template('admin_signup.html', error='Username already exists.')
-            
-        hashed_pw = generate_password_hash(password)
-        hashed_ans = generate_password_hash(answer)
-        
-        conn.execute('INSERT INTO users (username, password_hash, role, secret_question, secret_answer_hash) VALUES (?, ?, ?, ?, ?)',
-                     (username, hashed_pw, 'admin', question, hashed_ans))
-        conn.execute('UPDATE signup_passcodes SET is_used = 1 WHERE id = ?', (pc_row['id'],))
-        conn.commit()
-        conn.close()
-        
-        return redirect(url_for('admin_login'))
-    return render_template('admin_signup.html')
-
-# ---------------------------------------------------------------------------
-# Super Admin
-# ---------------------------------------------------------------------------
-
-@app.route('/super_admin')
-@super_admin_required
-def super_admin():
-    conn = get_db()
-    users = conn.execute('SELECT id, username, role FROM users').fetchall()
-    passcodes = conn.execute('SELECT passcode, is_used FROM signup_passcodes').fetchall()
-    
-    current_month_prefix = datetime.now(IST).strftime('%Y-%m')
-    ocr_usage = conn.execute('''
-        SELECT account_name, SUM(request_count) as total_requests
-        FROM ocr_usage_log
-        WHERE usage_date LIKE ?
-        GROUP BY account_name
-    ''', (f'{current_month_prefix}%',)).fetchall()
-    
-    conn.close()
-    return render_template('super_admin_dashboard.html', users=users, passcodes=passcodes, ocr_usage=ocr_usage, state=scraper_state)
-
-@app.route('/super_admin/generate_passcode', methods=['POST'])
-@super_admin_required
-def generate_passcode():
-    code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-    conn = get_db()
-    conn.execute('INSERT INTO signup_passcodes (passcode, created_by) VALUES (?, ?)', (code, session['user_id']))
-    conn.commit()
-    conn.close()
-    return redirect(url_for('super_admin'))
-
-@app.route('/super_admin/reset_password/<int:user_id>', methods=['POST'])
-@super_admin_required
-def reset_user_password(user_id):
-    conn = get_db()
-    user = conn.execute('SELECT role FROM users WHERE id = ?', (user_id,)).fetchone()
-    if user and user['role'] != 'super_admin':
-        default_pw = generate_password_hash('Default@123')
-        conn.execute('UPDATE users SET password_hash = ?, force_password_change = 1 WHERE id = ?', (default_pw, user_id))
-        conn.commit()
-    conn.close()
-    return redirect(url_for('super_admin'))
-
-# ---------------------------------------------------------------------------
-# Admin & Scraper API
-# ---------------------------------------------------------------------------
-
-@app.route('/admin')
-@login_required
-def admin():
-    return render_template('admin.html', state=scraper_state, rtis_state=rtis_state)
-
-@app.route('/admin/settings', methods=['GET', 'POST'])
-@login_required
-def admin_settings():
-    if request.method == 'POST':
-        cms_user = request.form.get('cms_username', '').strip()
-        cms_pass = request.form.get('cms_password', '').strip()
-        rtis_user = request.form.get('rtis_username', '').strip()
-        rtis_pass = request.form.get('rtis_password', '').strip()
-        # Checkbox: present = 1, absent = 0
-        allow_manual = 1 if request.form.get('allow_manual_entry') == 'on' else 0
-        
-        if cms_user and cms_pass:
-            conn = get_db()
-            try:
-                conn.execute(
-                    'UPDATE cms_settings SET cms_username = ?, cms_password = ?, allow_manual_entry = ?, rtis_username = ?, rtis_password = ? WHERE id = 1',
-                    (cms_user, cms_pass, allow_manual, rtis_user, rtis_pass)
-                )
-                conn.commit()
-                flash('Settings saved successfully.', 'success')
-            except Exception as e:
-                flash(f'Failed to save settings: {str(e)}', 'error')
-            finally:
-                conn.close()
-            return redirect(url_for('admin_settings'))
-        else:
-            flash('Both CMS username and password are required.', 'error')
-    
-    conn = get_db()
-    row = conn.execute('SELECT cms_username, cms_password, allow_manual_entry, rtis_username, rtis_password FROM cms_settings WHERE id = 1').fetchone()
-    conn.close()
-    return render_template('admin_settings.html', settings=row)
-
-@app.route('/admin/reports')
-@login_required
-def admin_reports():
-    conn = get_db()
-    cutoff = datetime.now(IST) - timedelta(days=30)
-    
-    # We will fetch all submissions and filter manually due to date format DD-MM-YYYY
-    subs = conn.execute('SELECT crew_id, name, desig, bpc_no, submitted_at FROM crew_submissions').fetchall()
-    conn.close()
-    
-    stats = {}
-    for row in subs:
-        try:
-            dt = datetime.strptime(row['submitted_at'], '%d-%m-%Y %H:%M:%S')
-            if dt >= cutoff:
-                cid = row['crew_id']
-                if cid not in stats:
-                    stats[cid] = {'crew_id': cid, 'name': row['name'], 'desig': row['desig'], 'total': 0, 'with_bpc': 0}
-                
-                stats[cid]['total'] += 1
-                bpc = row['bpc_no']
-                if bpc and bpc.strip() and bpc.strip() != '-':
-                    stats[cid]['with_bpc'] += 1
-        except:
-            pass
-            
-    # List of crew members who haven't entered BPC at all
-    zero_bpc = [v for v in stats.values() if v['with_bpc'] == 0]
-    
-    # Count for each ID
-    all_bpc_stats = list(stats.values())
-    
-    return render_template('admin_reports.html', zero_bpc=zero_bpc, all_bpc_stats=all_bpc_stats)
-
-
-# ---------------------------------------------------------------------------
-# Report: Duty Sheet Export
-# ---------------------------------------------------------------------------
-
-def _parse_dt_report(val):
-    """Parse date string (DD-MM-YYYY HH:MM variants) into IST-aware datetime."""
-    if not val or val == '-':
-        return None
-    val = val.strip()
-    for fmt in ['%d-%m-%Y %H:%M:%S', '%d-%m-%Y %H:%M', '%d-%m-%y %H:%M',
-                '%d-%m-%Y', '%d-%m-%y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
-        try:
-            return datetime.strptime(val, fmt).replace(tzinfo=IST)
-        except ValueError:
-            pass
-    return None
-
-
-def _build_duty_sheet_data(from_dt, to_dt):
-    """
-    Merge crew_records + crew_submissions + admin_edits (same priority as crew_list)
-    and filter rows whose sign_on_time falls within [from_dt, to_dt].
-    Returns a list of dicts ready for rendering / CSV export.
-    """
-    conn = get_db()
-    records  = conn.execute('SELECT * FROM crew_records').fetchall()
-    subs_raw = conn.execute('''
-        SELECT * FROM crew_submissions
-        WHERE id IN (SELECT MAX(id) FROM crew_submissions GROUP BY crew_id)
-    ''').fetchall()
-    ta_raw   = conn.execute('SELECT * FROM booking_ta_crew').fetchall()
-    ae_raw   = conn.execute('SELECT crew_id, field, value FROM admin_edits').fetchall()
-    conn.close()
-
-    subs_map = {r['crew_id']: dict(r) for r in subs_raw}
-    ta_map   = {r['crew_id']: dict(r) for r in ta_raw}
-
-    admin_edits_map = {}
-    for ae in ae_raw:
-        admin_edits_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['value']
-
-    def merge_row(r_dict, s_dict, ae, ta):
-        return {
-            'crew_id':          r_dict.get('crew_id') or s_dict.get('crew_id', ''),
-            'name':             s_dict.get('name') or r_dict.get('name', ''),
-            'desig':            s_dict.get('desig') or r_dict.get('desig', ''),
-            'sign_on_time':     r_dict.get('sign_on_time') or s_dict.get('sign_on_time', ''),
-            'from_sttn':        r_dict.get('from_sttn') or s_dict.get('from_sttn', ''),
-            'to_sttn':          s_dict.get('to_sttn') or r_dict.get('to_sttn', ''),
-            'loco_no':          ae.get('loco_no') or s_dict.get('loco_no') or r_dict.get('loco_no', ''),
-            'train_no':         ae.get('train_no') or s_dict.get('train_no') or r_dict.get('train_no', ''),
-            'bpc_no':           ae.get('bpc_no') or s_dict.get('bpc_no', ''),
-            'current_location': ae.get('current_location') or s_dict.get('current_location', ''),
-            'cto_time':         ae.get('cto_time') or s_dict.get('cto_time', ''),
-            'sign_off_time':    r_dict.get('sign_off_time', ''),
-            'is_relief':        int(ae.get('is_relief') or s_dict.get('is_relief') or 0),
-            'relief_station':   ae.get('relief_station') or s_dict.get('relief_station', ''),
-            'relief_datetime':  ae.get('relief_datetime') or s_dict.get('relief_datetime', ''),
-            'handover_crew_id': s_dict.get('handover_crew_id', ''),
-            'submitted_at':     s_dict.get('submitted_at', ''),
-            'departure_time':   s_dict.get('departure_time', ''),
-            'mobile_number':    ta.get('mobile_number', ''),
-        }
-
-    processed = {}
-    for r in records:
-        r = dict(r)
-        cid = r['crew_id']
-        processed[cid] = merge_row(r, subs_map.get(cid, {}),
-                                   admin_edits_map.get(cid, {}),
-                                   ta_map.get(cid, {}))
-
-    # Submission-only rows (crew not in CMS records)
-    for cid, s in subs_map.items():
-        if cid not in processed:
-            processed[cid] = merge_row({}, s,
-                                       admin_edits_map.get(cid, {}),
-                                       ta_map.get(cid, {}))
-
-    now = datetime.now(IST)
-    data = []
-    for row in processed.values():
-        sign_on_dt = _parse_dt_report(row.get('sign_on_time'))
-        if not sign_on_dt or not (from_dt <= sign_on_dt <= to_dt):
-            continue
-
-        # Compute live duty hours
-        delta = now - sign_on_dt
-        total_min = int(delta.total_seconds() // 60)
-        row['duty_hrs'] = f"{total_min // 60:02d}:{total_min % 60:02d}"
-
-        # Format date strings for display
-        for col in ['sign_on_time', 'cto_time', 'relief_datetime', 'departure_time']:
-            dt = _parse_dt_report(row.get(col, ''))
-            row[col] = dt.strftime('%d/%m/%y %H:%M') if dt else (row.get(col) or '-')
-
-        row['_sign_on_dt'] = sign_on_dt
-        data.append(row)
-
-    data.sort(key=lambda r: r['_sign_on_dt'], reverse=True)
-    for row in data:
-        row.pop('_sign_on_dt', None)
-
-    return data
-
-
-@app.route('/admin/report/duty_sheet')
-@login_required
-def report_duty_sheet():
-    yesterday = (datetime.now(IST) - timedelta(days=1)).date()
-    from_date_str = request.args.get('from_date', yesterday.strftime('%Y-%m-%d'))
-    to_date_str   = request.args.get('to_date',   yesterday.strftime('%Y-%m-%d'))
-    do_export     = request.args.get('export', '0') == '1'
-
-    try:
-        from_dt = datetime.strptime(from_date_str, '%Y-%m-%d').replace(
-            hour=0, minute=0, second=0, tzinfo=IST)
-        to_dt   = datetime.strptime(to_date_str,   '%Y-%m-%d').replace(
-            hour=23, minute=59, second=59, tzinfo=IST)
-    except ValueError:
-        from_dt = (datetime.now(IST) - timedelta(days=1)).replace(hour=0,  minute=0,  second=0)
-        to_dt   = from_dt.replace(hour=23, minute=59, second=59)
-        from_date_str = from_dt.strftime('%Y-%m-%d')
-        to_date_str   = to_dt.strftime('%Y-%m-%d')
-
-    data = _build_duty_sheet_data(from_dt, to_dt)
-
-    if do_export:
-        import io
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow([
-            'Crew ID', 'Name', 'Designation', 'Sign-On Time', 'From Station',
-            'To Station', 'Loco No', 'Train No', 'BPC No', 'Current Location',
-            'CTO Time', 'Duty Hrs', 'Relief?', 'Relief Station',
-            'Relief Date-Time', 'Handover Crew ID', 'Submitted At', 'Mobile No'
-        ])
-        for row in data:
-            writer.writerow([
-                row.get('crew_id', ''),        row.get('name', ''),
-                row.get('desig', ''),           row.get('sign_on_time', ''),
-                row.get('from_sttn', ''),       row.get('to_sttn', ''),
-                row.get('loco_no', ''),         row.get('train_no', ''),
-                row.get('bpc_no', ''),          row.get('current_location', ''),
-                row.get('cto_time', ''),        row.get('duty_hrs', ''),
-                'Yes' if row.get('is_relief') else 'No',
-                row.get('relief_station', ''), row.get('relief_datetime', ''),
-                row.get('handover_crew_id', ''), row.get('submitted_at', ''),
-                row.get('mobile_number', ''),
-            ])
-        output.seek(0)
-        filename = f"Duty_Sheet_{from_date_str}_to_{to_date_str}.csv"
-        from flask import Response as FlaskResponse
-        return FlaskResponse(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
-        )
-
-    return render_template('report_duty_sheet.html',
-                           data=data,
-                           from_date=from_date_str,
-                           to_date=to_date_str,
-                           count=len(data))
-
-
-# ---------------------------------------------------------------------------
-# Report: Non-Submitting Crew
-# ---------------------------------------------------------------------------
-
-@app.route('/admin/report/non_submitters')
-@login_required
-def report_non_submitters():
-    yesterday = (datetime.now(IST) - timedelta(days=1)).date()
-    from_date_str = request.args.get('from_date', yesterday.strftime('%Y-%m-%d'))
-    to_date_str   = request.args.get('to_date',   yesterday.strftime('%Y-%m-%d'))
-    do_export     = request.args.get('export', '0') == '1'
-
-    try:
-        from_dt = datetime.strptime(from_date_str, '%Y-%m-%d').replace(
-            hour=0, minute=0, second=0, tzinfo=IST)
-        to_dt   = datetime.strptime(to_date_str,   '%Y-%m-%d').replace(
-            hour=23, minute=59, second=59, tzinfo=IST)
-    except ValueError:
-        from_dt = (datetime.now(IST) - timedelta(days=1)).replace(hour=0,  minute=0,  second=0)
-        to_dt   = from_dt.replace(hour=23, minute=59, second=59)
-        from_date_str = from_dt.strftime('%Y-%m-%d')
-        to_date_str   = to_dt.strftime('%Y-%m-%d')
-
-    conn = get_db()
-    logs = conn.execute('SELECT crew_id, name, desig, from_sttn, sign_on_time, category, has_submission FROM crew_duty_log').fetchall()
-    
-    # Active records
-    recs = conn.execute('''
-        SELECT r.crew_id, r.name, r.desig, r.from_sttn, r.sign_on_time, r.category,
-               (SELECT COUNT(id) FROM crew_submissions s WHERE s.crew_id = r.crew_id LIMIT 1) as has_submission
-        FROM crew_records r WHERE r.is_active = 1
-    ''').fetchall()
-    conn.close()
-
-    duty_map = {} # (crew_id, sign_on_dt_str) -> dict
-    
-    def process_row(row):
-        sign_on_dt = _parse_dt_report(row['sign_on_time'])
-        if sign_on_dt and from_dt <= sign_on_dt <= to_dt:
-            key = (row['crew_id'], row['sign_on_time'])
-            if key not in duty_map:
-                duty_map[key] = {
-                    'crew_id': row['crew_id'],
-                    'name': row['name'] or '',
-                    'desig': row['desig'] or '',
-                    'has_submission': bool(row['has_submission'])
-                }
-            else:
-                # If either has submission, it's submitted
-                duty_map[key]['has_submission'] = duty_map[key]['has_submission'] or bool(row['has_submission'])
-
-    for row in logs: process_row(row)
-    for row in recs: process_row(row)
-
-    # Now aggregate per crew
-    crew_stats = {}
-    for key, data in duty_map.items():
-        cid = data['crew_id']
-        if cid not in crew_stats:
-            crew_stats[cid] = {
-                'crew_id': cid,
-                'name': data['name'],
-                'desig': data['desig'],
-                'total_duties': 0,
-                'submitted': 0,
-                'not_submitted': 0
-            }
-        
-        crew_stats[cid]['total_duties'] += 1
-        if data['has_submission']:
-            crew_stats[cid]['submitted'] += 1
-        else:
-            crew_stats[cid]['not_submitted'] += 1
-
-    # Filter to only show crew who have at least one not_submitted duty
-    non_submitters = [stats for stats in crew_stats.values() if stats['not_submitted'] > 0]
-    non_submitters.sort(key=lambda x: x['not_submitted'], reverse=True)
-
-    if do_export:
-        import io
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Crew ID', 'Name', 'Designation', 'Total Duties', 'Submitted', 'Not Submitted'])
-        for row in non_submitters:
-            writer.writerow([
-                row['crew_id'], row['name'], row['desig'],
-                row['total_duties'], row['submitted'], row['not_submitted']
-            ])
-        output.seek(0)
-        filename = f"Non_Submitters_{from_date_str}_to_{to_date_str}.csv"
-        from flask import Response as FlaskResponse
-        return FlaskResponse(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
-        )
-
-    return render_template('report_non_submitters.html',
-                           data=non_submitters,
-                           from_date=from_date_str,
-                           to_date=to_date_str,
-                           count=len(non_submitters))
-
-
-@app.route('/admin/submit_action', methods=['POST'])
-@login_required
-def admin_submit_action():
-    action_value = request.form.get('action_value', '').strip()
-    if action_value:
-        scraper_state['submitted_value'] = action_value
-        scraper_state['action_required'] = False
-        scraper_state['message'] = 'Action submitted. Waiting for scraper to process...'
-        scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/admin/scraper/trigger', methods=['POST'])
-@login_required
-def scraper_trigger():
-    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
-    fatal_file = os.path.join(BASE_DIR, 'data', 'fatal_error.txt')
-    if os.path.exists(stop_file):
-        os.remove(stop_file)
-    if os.path.exists(fatal_file):
-        os.remove(fatal_file)
-        
-    scraper_state['status'] = 'starting'
-    scraper_state['message'] = 'Manual trigger initiated...'
-    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/admin/scraper/cancel', methods=['POST'])
-@login_required
-def scraper_cancel():
-    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
-    with open(stop_file, 'w') as f:
-        f.write('stop')
-        
-    scraper_state['status'] = 'cancelled'
-    scraper_state['message'] = 'Stopping scraper gracefully...'
-    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/admin/scraper/run_now', methods=['POST'])
-@login_required
-def scraper_run_now():
-    """Wake up a sleeping scraper immediately to start a new sync cycle."""
-    run_now_file = os.path.join(BASE_DIR, 'data', 'run_now.txt')
-    stop_file = os.path.join(BASE_DIR, 'data', 'stop.txt')
-    fatal_file = os.path.join(BASE_DIR, 'data', 'fatal_error.txt')
-
-    # If scraper was hard-stopped, clear that first so the thread can restart it
-    if os.path.exists(stop_file):
-        os.remove(stop_file)
-    if os.path.exists(fatal_file):
-        os.remove(fatal_file)
-
-    # Write the run-now signal; the scraper's interruptible_sleep will detect it
-    with open(run_now_file, 'w') as f:
-        f.write('run')
-
-    scraper_state['status'] = 'starting'
-    scraper_state['message'] = 'Manual run triggered — waking scraper...'
-    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/api/scraper/state', methods=['POST'])
-def update_scraper_state():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-
-    payload = request.get_json(force=True)
-    scraper_state['status'] = payload.get('status', scraper_state['status'])
-    scraper_state['message'] = payload.get('message', scraper_state['message'])
-    if 'action_required' in payload:
-        scraper_state['action_required'] = payload['action_required']
-        scraper_state['action_type'] = payload.get('action_type', '')
-        scraper_state['image_base64'] = payload.get('image_base64', '')
-        scraper_state['phone_number'] = payload.get('phone_number')
-        scraper_state['submitted_value'] = None # reset
-        
-    if 'active_tunnel' in payload:
-        scraper_state['active_tunnel'] = payload['active_tunnel']
-        
-    if 'last_ddddocr_failure' in payload:
-        scraper_state['last_ddddocr_failure'] = payload['last_ddddocr_failure']
-    
-    scraper_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return jsonify({'success': True})
-
-@app.route('/api/scraper/action', methods=['GET'])
-def get_scraper_action():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-    
-    return jsonify({
-        'submitted_value': scraper_state.get('submitted_value')
-    })
-
-# ---------------------------------------------------------------------------
-# RTIS Scraper Admin & API Endpoints
-# ---------------------------------------------------------------------------
-
-@app.route('/admin/rtis/submit_action', methods=['POST'])
-@login_required
-def rtis_submit_action():
-    action_value = request.form.get('action_value', '').strip()
-    if action_value:
-        rtis_state['submitted_value'] = action_value
-        rtis_state['action_required'] = False
-        rtis_state['message'] = 'Action submitted. Waiting for RTIS scraper to process...'
-        rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/admin/rtis/trigger', methods=['POST'])
-@login_required
-def rtis_trigger():
-    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
-    fatal_file = os.path.join(BASE_DIR, 'data', 'rtis_fatal_error.txt')
-    if os.path.exists(stop_file): os.remove(stop_file)
-    if os.path.exists(fatal_file): os.remove(fatal_file)
-    rtis_state['status'] = 'starting'
-    rtis_state['message'] = 'Manual RTIS trigger initiated...'
-    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/admin/rtis/cancel', methods=['POST'])
-@login_required
-def rtis_cancel():
-    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
-    with open(stop_file, 'w') as f: f.write('stop')
-    rtis_state['status'] = 'cancelled'
-    rtis_state['message'] = 'Stopping RTIS scraper gracefully...'
-    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/admin/rtis/run_now', methods=['POST'])
-@login_required
-def rtis_run_now():
-    run_now_file = os.path.join(BASE_DIR, 'data', 'rtis_run_now.txt')
-    stop_file = os.path.join(BASE_DIR, 'data', 'rtis_stop.txt')
-    fatal_file = os.path.join(BASE_DIR, 'data', 'rtis_fatal_error.txt')
-    if os.path.exists(stop_file): os.remove(stop_file)
-    if os.path.exists(fatal_file): os.remove(fatal_file)
-    with open(run_now_file, 'w') as f: f.write('run')
-    rtis_state['status'] = 'starting'
-    rtis_state['message'] = 'Manual RTIS run triggered — waking scraper...'
-    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return redirect(url_for('admin'))
-
-@app.route('/api/rtis/state', methods=['POST'])
-def update_rtis_state():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-
-    payload = request.get_json(force=True)
-    rtis_state['status'] = payload.get('status', rtis_state['status'])
-    rtis_state['message'] = payload.get('message', rtis_state['message'])
-    if 'action_required' in payload:
-        rtis_state['action_required'] = payload['action_required']
-        rtis_state['action_type'] = payload.get('action_type', '')
-        rtis_state['image_base64'] = payload.get('image_base64', '')
-        rtis_state['phone_number'] = payload.get('phone_number')
-        rtis_state['submitted_value'] = None # reset
-    if 'active_tunnel' in payload:
-        rtis_state['active_tunnel'] = payload['active_tunnel']
-    if 'last_run' in payload:
-        rtis_state['last_run'] = payload['last_run']
-        
-    rtis_state['last_updated'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return jsonify({'success': True})
-
-@app.route('/api/rtis/action', methods=['GET'])
-def get_rtis_action():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-    return jsonify({'submitted_value': rtis_state.get('submitted_value')})
-
-@app.route('/api/rtis/active_locos', methods=['GET'])
-def get_active_locos():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-    
-    conn = get_db()
-    locos = set()
-    mapping = {}
-    locos_to_release = []
-    
-    try:
-        # Query active crews with their loco from submissions/admin (ignore CMS loco) and relief/handover info.
-        query = '''
-        SELECT 
-            r.crew_id,
-            COALESCE(a_loco.value, s.loco_no) AS loco_no,
-            COALESCE(a_relief.value, s.is_relief, 0) AS is_relief,
-            s.handover_crew_id,
-            s.relief_datetime
-        FROM crew_records r
-        LEFT JOIN (
-            SELECT crew_id, loco_no, is_relief, handover_crew_id, relief_datetime FROM crew_submissions 
-            WHERE id IN (SELECT MAX(id) FROM crew_submissions GROUP BY crew_id)
-        ) s ON r.crew_id = s.crew_id
-        LEFT JOIN (
-            SELECT crew_id, value FROM admin_edits WHERE field = 'loco_no'
-        ) a_loco ON r.crew_id = a_loco.crew_id
-        LEFT JOIN (
-            SELECT crew_id, value FROM admin_edits WHERE field = 'is_relief'
-        ) a_relief ON r.crew_id = a_relief.crew_id
-        WHERE r.is_active = 1
-          AND COALESCE(a_loco.value, s.loco_no) IS NOT NULL
-          AND COALESCE(a_loco.value, s.loco_no) != ''
-          AND COALESCE(a_loco.value, s.loco_no) != '-'
-        '''
-        rows = conn.execute(query).fetchall()
-        
-        for r in rows:
-            is_rel = int(r['is_relief'] or 0)
-            loco_str = r['loco_no']
-            if not loco_str or loco_str in ('', '-'):
-                continue
-            for l in loco_str.split(','):
-                l = l.strip()
-                if not l:
-                    continue
-                if is_rel == 1:
-                    # Crew has been fully relieved: if a handover crew exists, track loco for them
-                    handover = (r['handover_crew_id'] or '').strip().upper()
-                    if handover:
-                        mapping[l] = handover
-                        locos.add(l)
-                    # else: no handover crew — loco will be in locos_to_release
-                else:
-                    # Active crew; if relief handover is registered, transfer tracking to handover crew
-                    handover = (r['handover_crew_id'] or '').strip().upper()
-                    if handover and r['relief_datetime']:
-                        mapping[l] = handover
-                    else:
-                        mapping[l] = r['crew_id']
-                    locos.add(l)
-
-        # Find loco_locations rows whose loco is no longer in the active set
-        existing_loco_rows = conn.execute('SELECT loco_no FROM loco_locations').fetchall()
-        locos_to_release = [row['loco_no'] for row in existing_loco_rows if row['loco_no'] not in locos]
-
-    except Exception as e:
-        print(f"Error in active_locos: {e}")
-        
-    conn.close()
-    return jsonify({'locos': list(locos), 'mapping': mapping, 'locos_to_release': locos_to_release})
-
-@app.route('/api/rtis/sync_loco', methods=['POST'])
-def sync_loco_location():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-    
-    payload = request.get_json(force=True)
-    loco_no = payload.get('loco_no')
-    crew_id = payload.get('crew_id')
-    lat = payload.get('latitude')
-    lon = payload.get('longitude')
-    loc_name = payload.get('location_name')
-    moved = payload.get('moved_gt_100m', False)
-    
-    if not loco_no:
-        return jsonify({'error': 'loco_no required'}), 400
-        
-    conn = get_db()
-    now_str = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    
-    try:
-        # --- Read phase (no lock needed) ---
-        existing = conn.execute('SELECT crew_id, latitude, longitude, location_name, updated_at FROM loco_locations WHERE loco_no = ?', (loco_no,)).fetchone()
-        
-        # Pre-check departure_time so we don't hold the lock during reads
-        should_set_departure = False
-        if moved and crew_id:
-            existing_dep = conn.execute(
-                "SELECT departure_time FROM crew_submissions WHERE crew_id = ? AND is_active = 1",
-                (crew_id,)
-            ).fetchone()
-            admin_dep = conn.execute(
-                "SELECT value FROM admin_edits WHERE crew_id = ? AND field = 'departure_time'",
-                (crew_id,)
-            ).fetchone()
-            
-            has_existing = (existing_dep and existing_dep['departure_time'] and 
-                            existing_dep['departure_time'] not in ('', '-', '–'))
-            has_admin = (admin_dep and admin_dep['value'] and 
-                         admin_dep['value'] not in ('', '-', '–'))
-            
-            if not has_existing and not has_admin:
-                should_set_departure = True
-            else:
-                print(f"[RTIS] Skipped departure_time for {crew_id} — already set by {'admin' if has_admin else 'crew'}")
-
-        # --- Write phase (lock only for writes) ---
-        with DB_WRITE_LOCK:
-            if existing:
-                crew_changed = (existing['crew_id'] != crew_id)
-                lat_lon_changed = (round(existing['latitude'] or 0, 5) != round(lat or 0, 5) or
-                                   round(existing['longitude'] or 0, 5) != round(lon or 0, 5))
-                name_changed = (existing['location_name'] != loc_name)
-                loc_changed = moved or lat_lon_changed or name_changed or crew_changed
-                new_updated_at = now_str if loc_changed else existing['updated_at']
-                
-                conn.execute('''
-                    UPDATE loco_locations 
-                    SET crew_id = ?, prev_latitude = ?, prev_longitude = ?, 
-                        latitude = ?, longitude = ?, location_name = ?, 
-                        same_as_previous = ?, updated_at = ?
-                    WHERE loco_no = ?
-                ''', (crew_id, existing['latitude'], existing['longitude'], lat, lon, loc_name,
-                      0 if loc_changed else 1, new_updated_at, loco_no))
-                
-                if loc_changed:
-                    print(f"[RTIS] Loco {loco_no} ({crew_id}): {existing['location_name']} → {loc_name} "
-                          f"| moved={moved} lat_lon_changed={lat_lon_changed} "
-                          f"| updated_at={new_updated_at}")
-            else:
-                conn.execute('''
-                    INSERT INTO loco_locations (loco_no, crew_id, latitude, longitude, location_name, prev_latitude, prev_longitude, same_as_previous, updated_at, created_at)
-                    VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, ?, ?)
-                ''', (loco_no, crew_id, lat, lon, loc_name, now_str, now_str))
-                print(f"[RTIS] Loco {loco_no} ({crew_id}): NEW entry at {loc_name} | {now_str}")
-                
-            if should_set_departure:
-                try:
-                    conn.execute("UPDATE crew_submissions SET departure_time = ? WHERE crew_id = ? AND is_active = 1", 
-                                 (now_str, crew_id))
-                    print(f"[RTIS] Set departure_time for {crew_id} (no prior entry)")
-                except Exception as e:
-                    print(f"Error updating departure_time: {e}")
-                    
-            conn.commit()
-    except Exception as e:
-        print(f"[RTIS] sync_loco ERROR for {loco_no}: {e}")
-        conn.close()
-        return jsonify({'error': str(e)}), 500
-        
-    conn.close()
-    return jsonify({'success': True})
-
-@app.route('/api/rtis/release_loco', methods=['POST'])
-def release_loco():
-    """Dissociate a loco from its tracked crew by deleting its loco_locations row.
-    Called by the RTIS scraper when a loco is no longer associated with any active crew."""
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-    
-    payload = request.get_json(force=True)
-    loco_no = payload.get('loco_no')
-    if not loco_no:
-        return jsonify({'error': 'loco_no required'}), 400
-    
-    conn = get_db()
-    with DB_WRITE_LOCK:
-        conn.execute('DELETE FROM loco_locations WHERE loco_no = ?', (loco_no,))
-        conn.commit()
-    conn.close()
-    print(f"[RTIS] Released loco {loco_no} from tracking (crew signed off or relieved).")
-    return jsonify({'success': True, 'loco_no': loco_no})
-
-
-def _get_crew_list_data(conn):
-    # Mark signed off crews as inactive
-    # Mark signed off crews as inactive (no lock needed — WAL handles concurrent reads/writes)
-    conn.execute('''
-        UPDATE crew_records 
-        SET is_active = 0 
-        WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-' AND is_active = 1
-    ''')
-    conn.execute('''
-        UPDATE crew_submissions 
-        SET is_active = 0 
-        WHERE is_active = 1 
-        AND crew_id IN (
-            SELECT crew_id FROM crew_records 
-            WHERE sign_off_time IS NOT NULL AND sign_off_time != '' AND sign_off_time != '-'
-        )
-    ''')
-    conn.commit()
-
-    query = '''
-    SELECT 
-        COALESCE(r.crew_id, s.crew_id) AS crew_id,
-        COALESCE(s.name, r.name) AS name,
-        COALESCE(s.desig, r.desig) AS desig,
-        COALESCE(r.sign_on_time, s.sign_on_time) AS sign_on_time,
-        COALESCE(r.from_sttn, s.from_sttn) AS from_sttn,
-        COALESCE(s.to_sttn, r.to_sttn) AS to_sttn,
-        COALESCE(s.loco_no, r.loco_no) AS loco_no,
-        COALESCE(s.train_no, r.train_no) AS train_no,
-        s.loco_no AS s_loco_no,
-        s.train_no AS s_train_no,
-        s.bpc_no,
-        s.current_location,
-        s.cto_time,
-        r.duty_hrs,
-        r.sign_off_time,
-        r.found_in_ns,
-        r.synced_at,
-        s.submitted_at,
-        COALESCE(s.is_relief, 0) AS is_relief,
-        s.relief_station,
-        s.relief_datetime,
-        s.handover_crew_id,
-        COALESCE(s.ingest_miss_count, 0) AS ingest_miss_count,
-        s.departure_time,
-        ta.ordering_time,
-        ta.mobile_number
-    FROM crew_records r
-    LEFT JOIN (
-        SELECT * FROM crew_submissions 
-        WHERE id IN (
-            SELECT MAX(id) FROM crew_submissions GROUP BY crew_id
-        )
-    ) s ON r.crew_id = s.crew_id
-    LEFT JOIN booking_ta_crew ta ON ta.crew_id = COALESCE(r.crew_id, s.crew_id)
-    WHERE COALESCE(r.is_active, 1) = 1 AND COALESCE(s.is_active, 1) = 1
-    
-    UNION
-    
-    SELECT 
-        COALESCE(r.crew_id, s.crew_id) AS crew_id,
-        COALESCE(s.name, r.name) AS name,
-        COALESCE(s.desig, r.desig) AS desig,
-        COALESCE(r.sign_on_time, s.sign_on_time) AS sign_on_time,
-        COALESCE(r.from_sttn, s.from_sttn) AS from_sttn,
-        COALESCE(s.to_sttn, r.to_sttn) AS to_sttn,
-        COALESCE(s.loco_no, r.loco_no) AS loco_no,
-        COALESCE(s.train_no, r.train_no) AS train_no,
-        s.loco_no AS s_loco_no,
-        s.train_no AS s_train_no,
-        s.bpc_no,
-        s.current_location,
-        s.cto_time,
-        r.duty_hrs,
-        r.sign_off_time,
-        r.found_in_ns,
-        r.synced_at,
-        s.submitted_at,
-        COALESCE(s.is_relief, 0) AS is_relief,
-        s.relief_station,
-        s.relief_datetime,
-        s.handover_crew_id,
-        COALESCE(s.ingest_miss_count, 0) AS ingest_miss_count,
-        s.departure_time,
-        ta.ordering_time,
-        ta.mobile_number
-    FROM (
-        SELECT * FROM crew_submissions 
-        WHERE id IN (
-            SELECT MAX(id) FROM crew_submissions GROUP BY crew_id
-        )
-    ) s
-    LEFT JOIN crew_records r ON r.crew_id = s.crew_id
-    LEFT JOIN booking_ta_crew ta ON ta.crew_id = COALESCE(r.crew_id, s.crew_id)
-    WHERE COALESCE(r.is_active, 1) = 1 AND COALESCE(s.is_active, 1) = 1
-    '''
-    
-    rows = conn.execute(query).fetchall()
-
-    # Load all admin_edits for efficient lookup
-    admin_edit_rows = conn.execute('SELECT crew_id, field, value, updated_at FROM admin_edits').fetchall()
-    admin_edits_map = {}
-    admin_edits_time_map = {}
-    for ae in admin_edit_rows:
-        admin_edits_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['value']
-        admin_edits_time_map.setdefault(ae['crew_id'], {})[ae['field']] = ae['updated_at']
-
-    # NOTE: conn stays open — we will batch all cleanup writes through it at the end
-    data = [dict(row) for row in rows]
-    
-    now = datetime.now(IST)
-
-    # Deferred cleanup lists — collected during the loop, executed in one batch at the end
-    _del_admin_edits    = []   # (crew_id, field)
-    _del_submissions    = []   # crew_id
-    _del_loc_admin      = []   # crew_id
-    _null_loc_sub       = []   # crew_id
-    _freeze_pdd         = []   # (crew_id, pdd_val)
-    _del_relief_admin   = []   # crew_id
-    _null_relief_sub    = []   # crew_id
-    _release_locos      = []   # loco_no — to delete from loco_locations
-
-    
-
-
-    # --- Fetch RTIS Loco Locations ---
-    try:
-        loco_locs = conn.execute("SELECT loco_no, crew_id, latitude, longitude, location_name, updated_at FROM loco_locations").fetchall()
-        rtis_locations = {}       # keyed by loco_no
-        rtis_loc_by_crew = {}     # keyed by crew_id — allows matching even when CMS shows a different loco
-        for l in loco_locs:
-            loc_entry = {
-                'lat': l['latitude'],
-                'lon': l['longitude'],
-                'loc': l['location_name'],
-                'time': l['updated_at']
-            }
-            rtis_locations[l['loco_no']] = loc_entry
-            if l['crew_id']:
-                rtis_loc_by_crew[l['crew_id']] = loc_entry
-    except Exception as e:
-        print(f"Error fetching loco locations: {e}")
-        rtis_locations = {}
-        rtis_loc_by_crew = {}
-
-
-    for row in data:
-        crew_id = row.get('crew_id', '')
-        crew_admin_edits = admin_edits_map.get(crew_id, {})
-
-        sign_on_dt = None
-        if row.get('sign_on_time') and row['sign_on_time'] not in ['-', '–']:
-            sign_on_dt = parse_dt(row['sign_on_time'])
-
-        # --- Retroactive Stale Data Cleanup (deferred) ---
-        if sign_on_dt:
-            # 1. Queue stale admin edits for deletion
-            for field in list(crew_admin_edits.keys()):
-                ae_time = admin_edits_time_map.get(crew_id, {}).get(field)
-                if ae_time:
-                    ae_dt = parse_dt(ae_time)
-                    if ae_dt and ae_dt < sign_on_dt:
-                        _del_admin_edits.append((crew_id, field))
-                        del crew_admin_edits[field]
-
-            # 2. Queue stale crew submissions for deletion
-            sub_time = row.get('submitted_at')
-            if sub_time:
-                sub_dt = parse_dt(sub_time)
-                if sub_dt and sub_dt < sign_on_dt:
-                    _del_submissions.append(crew_id)
-                    # Wipe submission data from current row immediately
-                    for sf in ['s_loco_no', 's_train_no', 'bpc_no', 'cto_time', 'is_relief', 'relief_station', 'relief_datetime']:
-                        if sf in row:
-                            row[sf] = None
-                    row['submitted_at'] = None
-
-        # --- Determine data source for each editable field ---
-        # Source priority: admin > crew submission > cms record
-        # We re-fetch from the raw query: loco_no, train_no come from COALESCE(s.loco_no, r.loco_no)
-        # We need to detect which source actually filled the value
-        #
-        # Strategy: track source per field
-        src = {}
-
-        for field in ['loco_no', 'train_no']:
-            # s_loco_no / s_train_no are the raw submission values (NULL if no submission)
-            sub_field = f's_{field}'
-            if field in crew_admin_edits and crew_admin_edits[field] is not None:
-                # Admin override takes highest priority
-                src[field] = 'admin'
-                row[field] = crew_admin_edits[field]
-            elif row.get(sub_field):
-                # Submission had a value for this field — COALESCE picked it (or it's the only source)
-                src[field] = 'sub'
-            elif row.get(field):
-                # Value exists but only from CMS crew_records (submission was NULL for this field)
-                src[field] = 'cms'
-            else:
-                src[field] = 'none'
-
-        row['_src'] = src
-
-        for field in ['bpc_no', 'cto_time', 'departure_time']:
-            if field in crew_admin_edits and crew_admin_edits[field] is not None:
-                src[field] = 'admin'
-                row[field] = crew_admin_edits[field]
-            elif row.get(field):
-                src[field] = 'sub'
-            else:
-                src[field] = 'none'
-
-        row['_loc_update_time'] = ''
-        loc_time_dt = None
-        
-        admin_loc = crew_admin_edits.get('current_location')
-        has_admin_loc = 'current_location' in crew_admin_edits
-        admin_loc_time_str = admin_edits_time_map.get(crew_id, {}).get('current_location', '')
-        admin_loc_dt = parse_dt(admin_loc_time_str) if admin_loc_time_str else None
-
-        sub_loc = row.get('current_location')
-        has_sub_loc = sub_loc is not None
-        sub_loc_time_str = row.get('submitted_at', '')
-        sub_loc_dt = parse_dt(sub_loc_time_str) if sub_loc_time_str else None
-
-        if has_admin_loc and has_sub_loc and admin_loc_dt and sub_loc_dt:
-            if admin_loc_dt >= sub_loc_dt:
-                src['current_location'] = 'admin'
-                row['current_location'] = admin_loc
-                loc_time_dt = admin_loc_dt
-            else:
-                src['current_location'] = 'sub'
-                # row['current_location'] already has sub_loc from SQL COALESCE, but we explicitly set it:
-                row['current_location'] = sub_loc
-                loc_time_dt = sub_loc_dt
-        elif has_admin_loc:
-            src['current_location'] = 'admin'
-            row['current_location'] = admin_loc
-            loc_time_dt = admin_loc_dt
-        elif has_sub_loc:
-            src['current_location'] = 'sub'
-            row['current_location'] = sub_loc
-            loc_time_dt = sub_loc_dt
-        else:
-            row['current_location'] = ''
-            src['current_location'] = 'none'
-            loc_time_dt = None
-
-        if loc_time_dt:
-            row['_loc_time_dt'] = loc_time_dt
-            row['_loc_update_time'] = loc_time_dt.strftime('%H:%M')
-        else:
-            row['_loc_time_dt'] = None
-
-        # Relief flag admin override
-        if 'is_relief' in crew_admin_edits:
-            try:
-                row['is_relief'] = int(crew_admin_edits['is_relief'])
-                src['is_relief'] = 'admin'
-            except:
-                src['is_relief'] = 'sub'
-        else:
-            src['is_relief'] = 'sub' if row.get('is_relief') else 'none'
-
-        row['_src'] = src
-
-        # --- Release loco tracking for relieved crews (deferred) ---
-        if row.get('is_relief') == 1:
-            # Crew has been fully relieved — release their loco from RTIS tracking
-            # (handover crew gets their own loco_locations entry when the scraper syncs)
-            loco_str_for_release = row.get('loco_no', '')
-            if loco_str_for_release and loco_str_for_release not in ('', '-'):
-                for _l in loco_str_for_release.split(','):
-                    _l = _l.strip()
-                    if _l and _l in rtis_locations:
-                        # Only release if this row's crew_id owns that loco_locations row
-                        ll_crew = conn.execute('SELECT crew_id FROM loco_locations WHERE loco_no=?', (_l,)).fetchone()
-                        if ll_crew and ll_crew['crew_id'] == crew_id:
-                            _release_locos.append(_l)
-
-        # --- Dynamically override current_location with latest RTIS location ---
-        run_rtis_check = True
-        # Skip RTIS check entirely if crew has marked relief
-        if row.get('is_relief') == 1:
-            run_rtis_check = False
-            
-        # Skip RTIS check if loco_no came strictly from CMS (not confirmed by crew/admin)
-        if row.get('_src', {}).get('loco_no') == 'cms':
-            run_rtis_check = False
-
-        if run_rtis_check:
-            loco_no_str = row.get('loco_no')
-            if not loco_no_str or loco_no_str in ('', '-'):
-                run_rtis_check = False
-
-        if run_rtis_check:
-            loco_no_str = row.get('loco_no')
-            # Build candidate list: search by loco_no first, then fall back to crew_id match
-            latest_time = None
-            latest_loc = None
-
-            def _parse_rtis_time(loc_data):
-                """Parse the updated_at field from loco_locations into a timezone-aware datetime."""
-                time_str = (loc_data.get('time') or '').replace(' IST', '').strip()
-                for fmt in ('%d/%m/%y %H:%M:%S', '%d/%m/%y %H:%M'):
-                    try:
-                        return datetime.strptime(time_str, fmt).replace(tzinfo=IST)
-                    except ValueError:
-                        pass
-                return None
-
-            if loco_no_str:
-                locos_rtis = [l.strip() for l in loco_no_str.split(',') if l.strip()]
-                for loco in locos_rtis:
-                    if loco in rtis_locations:
-                        loc_data = rtis_locations[loco]
-                        dt = _parse_rtis_time(loc_data)
-                        if dt and (latest_time is None or dt > latest_time):
-                            latest_time = dt
-                            latest_loc = loc_data
-
-            # Secondary: match by crew_id in loco_locations (handles CMS-loco mismatch)
-            if crew_id in rtis_loc_by_crew:
-                loc_data = rtis_loc_by_crew[crew_id]
-                dt = _parse_rtis_time(loc_data)
-                if dt and (latest_time is None or dt > latest_time):
-                    latest_time = dt
-                    latest_loc = loc_data
-
-            if latest_loc:
-                loc_str = latest_loc.get('loc')
-                # Treat 'Unknown' or empty as needing fallback
-                if not loc_str or loc_str.strip().lower() in ('', 'unknown'):
-                    loc_str = ''
-                
-                # Fallback to nearest station if loc is empty but lat/lon are present
-                if not loc_str and latest_loc.get('lat') and latest_loc.get('lon'):
-                    try:
-                        loc_str = get_nearest_station(float(latest_loc['lat']), float(latest_loc['lon']))
-                    except (ValueError, TypeError):
-                        pass
-                
-                # Always expose loco data for the template tooltip (even if loc_str is empty)
-                display_loc = loc_str if loc_str else ''
-                row['_latest_rtis_loco'] = {
-                    'loc': display_loc,
-                    'time': latest_loc['time'],
-                    'lat': latest_loc.get('lat', ''),
-                    'lon': latest_loc.get('lon', '')
-                }
-                
-                # Set current_location if we have a valid station string
-                if loc_str:
-                    # Compare with manual location update time
-                    manual_time = row.get('_loc_time_dt')
-                    if not manual_time or (latest_time and latest_time >= manual_time):
-                        row['current_location'] = loc_str
-                        row['is_rtis_location'] = True
-                        row['_loc_update_time'] = latest_time.strftime('%H:%M') if latest_time else latest_loc['time']
-                        # Note: Departure time is NOT auto-set here.
-                        # It is only set by: (a) crew submission, (b) admin edit,
-                        # or (c) RTIS scraper detecting >100m movement via /api/rtis/sync_loco.
-
-        # Read 'is_rtis_departure' from admin_edits if present
-        if crew_admin_edits.get('is_rtis_departure') == '1':
-            row['is_rtis_departure'] = True
-
-        # Calculate PDD dynamically based on current state
-        lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
-        from_sttn = (row.get('from_sttn', '') or '').upper().strip()
-        cto_sttn = (row.get('current_location', '') or '').upper().strip()
-        
-        nmp_cluster = {'NMP', 'NPTY', 'NKKH', 'NMMS', 'NMPY', 'NPDY', 'NPRY'}
-        from_sttn_norm = 'NMP' if from_sttn in nmp_cluster else from_sttn
-        cto_sttn_norm = 'NMP' if cto_sttn in nmp_cluster else cto_sttn
-
-        is_pdd_sttn = False
-        if sign_on_dt:
-            # If they have departed from any tracked station, they have a PDD.
-            if parse_dt(row.get('departure_time')) and (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}):
-                is_pdd_sttn = True
-            # Otherwise, if they haven't departed yet, check if they are physically at the lobby
-            elif from_sttn_norm in {'NMP', 'KGP'} and cto_sttn_norm in {'NMP', 'KGP'}:
-                is_pdd_sttn = True
-            elif (from_sttn_norm in lobbies or from_sttn in {'BHC', 'TATA'}) and from_sttn_norm == cto_sttn_norm:
-                is_pdd_sttn = True
-
-        if is_pdd_sttn:
-            departure_dt = parse_dt(row.get('departure_time'))
-            end_time = departure_dt if departure_dt else now
-            pdd_delta = end_time - sign_on_dt
-            if pdd_delta.total_seconds() > 0:
-                p_hours = int(pdd_delta.total_seconds() // 3600)
-                p_minutes = int((pdd_delta.total_seconds() % 3600) // 60)
-                row['pdd'] = f"{p_hours:02d}:{p_minutes:02d}"
-        else:
-            row['pdd'] = '-'
-
-        # Auto-remove location based on departure time (deferred)
-        if row.get('departure_time') and row.get('departure_time') not in ['-', '–']:
-            dep_dt = parse_dt(row['departure_time'])
-            if dep_dt:
-                if not loc_time_dt or dep_dt > loc_time_dt:
-                    # Case A: Location hasn't been updated recently (or is blank).
-                    _del_loc_admin.append(crew_id)
-                    _null_loc_sub.append(crew_id)
-                    row['current_location'] = ''
-                    src['current_location'] = 'none'
-                    row['_loc_update_time'] = dep_dt.strftime('%H:%M')
-                elif dep_dt <= loc_time_dt:
-                    # Case B: Location updated AFTER departure time.
-                    # Keep location UNLESS it's the sign-on station.
-                    lobbies = {'KGP', 'ADL', 'SRC', 'TPKR', 'NMP', 'BLS', 'GTS'}
-                    from_sttn = (row.get('from_sttn', '') or '').upper().strip()
-                    curr_loc = (row.get('current_location', '') or '').upper().strip()
-                    from_sttn_norm = 'NMP' if from_sttn == 'NPTY' else from_sttn
-                    curr_loc_norm = 'NMP' if curr_loc == 'NPTY' else curr_loc
-                    
-                    is_sign_on = False
-                    if from_sttn_norm in {'NMP', 'KGP'} and curr_loc_norm in {'NMP', 'KGP'}:
-                        is_sign_on = True
-                    elif from_sttn_norm in lobbies and from_sttn_norm == curr_loc_norm:
-                        is_sign_on = True
-                        
-                    if is_sign_on:
-                        _del_loc_admin.append(crew_id)
-                        _null_loc_sub.append(crew_id)
-                        row['current_location'] = ''
-                        src['current_location'] = 'none'
-                        row['_loc_update_time'] = dep_dt.strftime('%H:%M')
-
-        for field in ['relief_station', 'relief_datetime']:
-            if field in crew_admin_edits and crew_admin_edits[field] is not None:
-                src[field] = 'admin'
-                row[field] = crew_admin_edits[field]
-            elif row.get(field):
-                src[field] = 'sub'
-            else:
-                src[field] = 'none'
-
-
-        # Calculate Duty Hours (raw minutes stored for gradient sorting)
-        if sign_on_dt:
-            delta = now - sign_on_dt
-            total_minutes = int(delta.total_seconds() // 60)
-            hours = total_minutes // 60
-            minutes = total_minutes % 60
-            row['duty_hrs'] = f"{hours:02d}:{minutes:02d}"
-            row['_duty_minutes'] = total_minutes  # for gradient
-        else:
-            row['_duty_minutes'] = 0
-
-        # Auto-remove stale relief data if relief_datetime is before current sign_on_time (deferred)
-        if sign_on_dt and row.get('relief_datetime') and row['relief_datetime'] not in ['-', '–']:
-            relief_dt = parse_dt(row['relief_datetime'])
-            if relief_dt and relief_dt < sign_on_dt:
-                _del_relief_admin.append(crew_id)
-                _null_relief_sub.append(crew_id)
-                row['is_relief'] = 0
-                row['relief_station'] = ''
-                row['relief_datetime'] = ''
-                src['is_relief'] = 'none'
-                src['relief_station'] = 'none'
-                src['relief_datetime'] = 'none'
-
-        # Capture raw datetimes for sorting BEFORE display formatting overwrites the strings
-        row['_sign_on_dt'] = sign_on_dt if sign_on_dt else datetime.min.replace(tzinfo=IST)
-        row['_cto_dt'] = parse_dt(row.get('cto_time')) or datetime.min.replace(tzinfo=IST)
-
-        # Store ISO sign_on for JS live duty calc
-        row['_sign_on_iso'] = sign_on_dt.strftime('%Y-%m-%dT%H:%M:%S') if sign_on_dt else ''
-
-        # Filter ordering time: must be within 2 hours of sign on time
-        if sign_on_dt and row.get('ordering_time') and row['ordering_time'] != '-':
-            ord_dt = parse_dt(row['ordering_time'])
-            if ord_dt:
-                if abs((sign_on_dt - ord_dt).total_seconds()) > 7200:
-                    row['ordering_time'] = '-'
-                else:
-                    row['ordering_time'] = ord_dt.strftime('%H:%M')
-            else:
-                row['ordering_time'] = '-'
-
-        # Format dates universally (DD/MM/YY HH:MM) — happens AFTER capturing sort keys above
-        for col in ['sign_on_time']:
-            dt = parse_dt(row.get(col, ''))
-            if dt:
-                row[col] = dt.strftime('%d/%m/%y %H:%M')
-            elif col in row and not row[col]:
-                row[col] = '-'
-
-        # Format cto_time as time only
-        dt_cto = parse_dt(row.get('cto_time', ''))
-        if dt_cto:
-            row['cto_time'] = dt_cto.strftime('%H:%M')
-        elif 'cto_time' in row and not row['cto_time']:
-            row['cto_time'] = '-'
-
-        # Format departure_time as time only
-        dt_dep = parse_dt(row.get('departure_time', ''))
-        if dt_dep:
-            row['departure_time'] = dt_dep.strftime('%H:%M')
-        elif 'departure_time' in row and not row['departure_time']:
-            row['departure_time'] = '-'
-            
-        # Format relief_datetime as time only
-        dt_relief = parse_dt(row.get('relief_datetime', ''))
-        if dt_relief:
-            row['relief_datetime'] = dt_relief.strftime('%H:%M')
-        elif 'relief_datetime' in row and not row['relief_datetime']:
-            row['relief_datetime'] = '-'
-
-    # --- Execute all deferred DB cleanup in one batch using the single conn ---
-    try:
-        updated_at_freeze = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-        with DB_WRITE_LOCK:
-
-            for cid, field in _del_admin_edits:
-                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = ?", (cid, field))
-            for cid in _del_submissions:
-                conn.execute("DELETE FROM crew_submissions WHERE crew_id = ?", (cid,))
-            for cid in _del_loc_admin:
-                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'current_location'", (cid,))
-            for cid in _null_loc_sub:
-                conn.execute("UPDATE crew_submissions SET current_location = NULL WHERE crew_id = ?", (cid,))
-            for cid in _del_relief_admin:
-                conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field IN ('is_relief', 'relief_station', 'relief_datetime')", (cid,))
-            for cid in _null_relief_sub:
-                conn.execute("UPDATE crew_submissions SET is_relief = 0, relief_station = NULL, relief_datetime = NULL WHERE crew_id = ?", (cid,))
-            for loco_no in set(_release_locos):
-                conn.execute("DELETE FROM loco_locations WHERE loco_no = ?", (loco_no,))
-                print(f"[RTIS] Auto-released loco {loco_no} (crew fully relieved).")
-            conn.commit()
-    except Exception as e:
-        print(f"Deferred cleanup error: {e}")
-    finally:
-        conn.close()
-
-    def list_sort_key(r):
-        return (r.get('_duty_minutes', 0), r.get('_cto_dt', datetime.min.replace(tzinfo=IST)))
-
-    data.sort(key=list_sort_key, reverse=True)
-
-    total_signon = len(data)
-    total_10_hrs = sum(1 for r in data if r.get('_duty_minutes', 0) > 600)
-    total_12_hrs = sum(1 for r in data if r.get('_duty_minutes', 0) > 720)
-
-    # Clean up the internal sort-only keys so they don't leak into the template unnecessarily
-    for row in data:
-        row.pop('_sign_on_dt', None)
-        row.pop('_cto_dt', None)
-
-    return data, total_signon, total_10_hrs, total_12_hrs, rtis_locations
-
-@app.route('/crew_list')
-@login_required
-def crew_list():
-    conn = get_db()
-    data, total_signon, total_10_hrs, total_12_hrs, rtis_locations = _get_crew_list_data(conn)
-    conn.close()
-
-    return render_template('crew_list.html', 
-                           crew_list=data,
-                           total_signon=total_signon,
-                           total_10_hrs=total_10_hrs,
-                           total_12_hrs=total_12_hrs,
-                           rtis_locations=rtis_locations)
-
-@app.route('/live')
-def public_crew_list():
-    """Public read-only crew list — no login required, phone numbers excluded."""
-    conn = get_db()
-    data, total_signon, total_10_hrs, total_12_hrs, rtis_locations = _get_crew_list_data(conn)
-    conn.close()
-
-    return render_template('public_crew_list.html',
-                           crew_list=data,
-                           total_signon=total_signon,
-                           total_10_hrs=total_10_hrs,
-                           total_12_hrs=total_12_hrs,
-                           rtis_locations=rtis_locations)
-
-@app.route('/api/save_ns_status', methods=['POST'])
-@login_required
-def save_ns_status():
-    payload = request.get_json()
-    if not payload:
-        return jsonify({'status': 'error', 'message': 'No data'})
-        
-    conn = get_db()
-    for crew_id, status in payload.items():
-        conn.execute('UPDATE crew_records SET found_in_ns = ? WHERE crew_id = ?', (status, crew_id))
-    conn.commit()
-    conn.close()
-    return jsonify({'status': 'ok'})
-
-@app.route('/api/admin_edit', methods=['POST'])
-@login_required
-def api_admin_edit():
-    """Save an admin override for a specific field of a crew record."""
-    payload = request.get_json()
-    if not payload:
-        return jsonify({'status': 'error', 'message': 'No data'}), 400
-
-    crew_id = payload.get('crew_id', '').strip().upper()
-    field   = payload.get('field', '').strip()
-    value   = payload.get('value', '').strip()
-
-    ALLOWED_FIELDS = {'loco_no', 'train_no', 'bpc_no', 'current_location',
-                      'cto_time', 'departure_time', 'is_relief', 'relief_station', 'relief_datetime'}
-    if not crew_id or field not in ALLOWED_FIELDS:
-        return jsonify({'status': 'error', 'message': 'Invalid field or crew_id'}), 400
-
-    if field == 'loco_no':
-        import re
-        value = re.sub(r'[^0-9,]', '', value)
-
-    conn = get_db()
-
-    # If location is explicitly being removed, just let it be. PDD will dynamically track via departure_time.
-    if field == 'current_location':
-        if value != '':
-            conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'frozen_pdd'", (crew_id,))
-
-    if field == 'departure_time':
-        conn.execute("DELETE FROM admin_edits WHERE crew_id = ? AND field = 'is_rtis_departure'", (crew_id,))
-
-    if field in ('cto_time', 'departure_time', 'relief_datetime') and value and value not in ['-', '–']:
-        # Construct full datetime from sign_on_time + submitted time
-        r = conn.execute('''
-            SELECT COALESCE(s.sign_on_time, r.sign_on_time) as sign_on_time 
-            FROM crew_records r 
-            LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id 
-            WHERE r.crew_id = ?
-            ORDER BY s.id DESC LIMIT 1
-        ''', (crew_id,)).fetchone()
-            
-        if r and r['sign_on_time']:
-            sign_on_dt = parse_dt(r['sign_on_time'])
-            if sign_on_dt:
-                try:
-                    h, m = map(int, value.split(':'))
-                    new_dt = sign_on_dt.replace(hour=h, minute=m, second=0)
-                    if new_dt < sign_on_dt:
-                        new_dt += timedelta(days=1)
-                    value = new_dt.strftime('%d-%m-%Y %H:%M:%S')
-                except ValueError:
-                    pass
-
-    updated_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-    conn.execute('''
-        INSERT INTO admin_edits (crew_id, field, value, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-    ''', (crew_id, field, value, updated_at))
-
-    # Auto-clear location and freeze PDD if departure_time is entered and is >= last loc update
-    if field == 'departure_time' and value and value not in ['-', '–']:
-        loc_row = conn.execute('''
-            SELECT COALESCE(s.current_location, '') as sub_loc,
-                   s.submitted_at as sub_time,
-                   a.value as admin_loc,
-                   a.updated_at as admin_loc_time
-            FROM crew_records r
-            LEFT JOIN crew_submissions s ON r.crew_id = s.crew_id
-            LEFT JOIN admin_edits a ON r.crew_id = a.crew_id AND a.field = 'current_location'
-            WHERE r.crew_id = ?
-            ORDER BY s.id DESC LIMIT 1
-        ''', (crew_id,)).fetchone()
-
-        if loc_row:
-            admin_loc_time_str = loc_row['admin_loc_time']
-            admin_loc_dt = parse_dt(admin_loc_time_str) if admin_loc_time_str else None
-            sub_loc_time_str = loc_row['sub_time']
-            sub_loc_dt = parse_dt(sub_loc_time_str) if sub_loc_time_str else None
-
-            active_loc = ''
-            loc_time_dt = None
-            if admin_loc_dt and sub_loc_dt:
-                if admin_loc_dt >= sub_loc_dt:
-                    active_loc = loc_row['admin_loc']
-                    loc_time_dt = admin_loc_dt
-                else:
-                    active_loc = loc_row['sub_loc']
-                    loc_time_dt = sub_loc_dt
-            elif admin_loc_dt:
-                active_loc = loc_row['admin_loc']
-                loc_time_dt = admin_loc_dt
-            elif sub_loc_dt:
-                active_loc = loc_row['sub_loc']
-                loc_time_dt = sub_loc_dt
-
-            new_dep_dt = parse_dt(value)
-            if active_loc and new_dep_dt and loc_time_dt and new_dep_dt >= loc_time_dt:
-                # Clear the location
-                conn.execute('''
-                    INSERT INTO admin_edits (crew_id, field, value, updated_at)
-                    VALUES (?, 'current_location', '', ?)
-                    ON CONFLICT(crew_id, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                ''', (crew_id, updated_at))
-
-    conn.commit()
-    conn.close()
-    return jsonify({'status': 'ok'})
-
-
-@app.route('/api/add_phone', methods=['POST'])
-@login_required
-def api_add_phone():
-    """Append a phone number (comma-separated) to a crew's mobile_number in booking_ta_crew."""
-    payload = request.get_json()
-    if not payload:
-        return jsonify({'status': 'error', 'message': 'No data'}), 400
-
-    crew_id = payload.get('crew_id', '').strip().upper()
-    phone   = payload.get('phone', '').strip()
-
-    if not crew_id or not phone:
-        return jsonify({'status': 'error', 'message': 'crew_id and phone required'}), 400
-
-    conn = get_db()
-    existing = conn.execute('SELECT mobile_number FROM booking_ta_crew WHERE crew_id = ?', (crew_id,)).fetchone()
-    fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-
-    if existing:
-        current = existing['mobile_number'] or ''
-        numbers = [n.strip() for n in current.split(',') if n.strip()]
-        if phone not in numbers:
-            numbers.append(phone)
-        new_value = ', '.join(numbers)
-        conn.execute('UPDATE booking_ta_crew SET mobile_number = ?, fetched_at = ? WHERE crew_id = ?',
-                     (new_value, fetched_at, crew_id))
-    else:
-        conn.execute('INSERT INTO booking_ta_crew (crew_id, mobile_number, fetched_at) VALUES (?, ?, ?)',
-                     (crew_id, phone, fetched_at))
-
-    conn.commit()
-    conn.close()
-    return jsonify({'status': 'ok'})
-
-@app.route('/api/crew_lookup/<crew_id>', methods=['GET'])
-def api_crew_lookup(crew_id):
-    crew_id = crew_id.strip().upper()
-    conn = get_db()
-    
-    # 1. Find latest submission for this crew
-    sub = conn.execute('''
-        SELECT loco_no, train_no, bpc_no 
-        FROM crew_submissions 
-        WHERE crew_id = ? 
-        ORDER BY submitted_at DESC LIMIT 1
-    ''', (crew_id,)).fetchone()
-    
-    if sub:
-        result = dict(sub)
-    else:
-        # Fallback to crew_records if no submission exists
-        rec = conn.execute('''
-            SELECT loco_no, train_no, '' as bpc_no 
-            FROM crew_records 
-            WHERE crew_id = ?
-        ''', (crew_id,)).fetchone()
-        result = dict(rec) if rec else {'loco_no': '', 'train_no': '', 'bpc_no': ''}
-
-    # 2. Apply any admin overrides
-    admin_edits = conn.execute('''
-        SELECT field, value 
-        FROM admin_edits 
-        WHERE crew_id = ? AND field IN ('loco_no', 'train_no', 'bpc_no')
-    ''', (crew_id,)).fetchall()
-    
-    for edit in admin_edits:
-        if edit['value'] is not None and edit['value'].strip() != '':
-            result[edit['field']] = edit['value']
-
-    conn.close()
-
-    if any(result.values()):
-        return jsonify({
-            'status': 'ok',
-            'loco_no': result.get('loco_no', ''),
-            'train_no': result.get('train_no', ''),
-            'bpc_no': result.get('bpc_no', '')
-        })
-    else:
-        return jsonify({'status': 'not_found'})
-
-@app.route('/api/active_crews', methods=['GET'])
-def api_active_crews():
-    try:
-        conn = get_db()
-        rows = conn.execute("SELECT crew_id, name, desig FROM crew_records WHERE is_active = 1").fetchall()
-        conn.close()
-        return jsonify([dict(r) for r in rows])
-    except Exception as e:
-        print(f"Error fetching active crews: {e}")
-        return jsonify([])
-
-@app.route('/api/stations', methods=['GET'])
-def api_stations():
-    stations = []
-    csv_path = os.path.join(BASE_DIR, 'webapp', '01_station_code.csv')
-    try:
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    lat = float(row.get('lat', 0))
-                    lon = float(row.get('long', 0))
-                    if lat and lon:
-                        stations.append({
-                            'code': row.get('code', row.get('ode', '')),
-                            'name': row.get('name', ''),
-                            'lat': lat,
-                            'lon': lon
-                        })
-                except ValueError:
-                    continue
-    except Exception as e:
-        print("Error reading stations:", e)
-    return jsonify(stations)
-
-@app.route('/api/ocr_usage', methods=['POST'])
-def api_ocr_usage():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-
-    payload = request.get_json(force=True)
-    account_name = payload.get('account_name')
-    if not account_name:
-        return jsonify({'error': 'Missing account_name'}), 400
-
-    usage_date = datetime.now(IST).strftime('%Y-%m-%d')
-    conn = get_db()
-    
-    with DB_WRITE_LOCK:
-        conn.execute('''
-            INSERT INTO ocr_usage_log (account_name, usage_date, request_count)
-            VALUES (?, ?, 1)
-            ON CONFLICT(account_name, usage_date) DO UPDATE SET
-                request_count = request_count + 1
-        ''', (account_name, usage_date))
-        conn.commit()
-    conn.close()
-    return jsonify({'status': 'success'})
-
-@app.route('/api/sync_ta', methods=['POST'])
-def api_sync_ta():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-
-    payload = request.get_json(force=True)
-    if not payload or not isinstance(payload, list): return jsonify({'error': 'Invalid payload'}), 400
-
-    conn = get_db()
-    fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-
-    for i, rec in enumerate(payload):
-        crew_id = rec.get('crew_id')
-        if not crew_id: continue
-        ordering_time = rec.get('ordering_time', '')
-        mobile_number = rec.get('mobile_number', '')
-            
-        conn.execute('''
-            INSERT INTO booking_ta_crew (crew_id, ordering_time, mobile_number, fetched_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(crew_id) DO UPDATE SET
-                ordering_time=excluded.ordering_time,
-                mobile_number=excluded.mobile_number,
-                fetched_at=excluded.fetched_at
-        ''', (crew_id, ordering_time, mobile_number, fetched_at))
-        
-        if i > 0 and i % 50 == 0:
-            conn.commit()
-            
-    conn.commit()
-    conn.close()
-    return jsonify({'status': 'success', 'count': len(payload)})
-
-@app.route('/api/sync', methods=['POST'])
-def api_sync():
-    auth = request.headers.get('X-API-Secret', '')
-    if auth != API_SECRET: return jsonify({'error': 'Unauthorized'}), 401
-
-    payload = request.get_json(force=True)
-    if not payload or not isinstance(payload, dict): return jsonify({'error': 'Invalid payload'}), 400
-
-    conn = get_db()
-    inserted = updated = skipped = 0
-    synced_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
-
-    for i, (crew_id, rec) in enumerate(payload.items()):
-        existing = conn.execute('SELECT * FROM crew_records WHERE crew_id = ?', (crew_id,)).fetchone()
-        if existing:
-            existing = dict(existing)
-            sub = conn.execute('SELECT id FROM crew_submissions WHERE crew_id = ?', (crew_id,)).fetchone()
-                
-            old_dt = parse_dt(existing.get('sign_on_time'))
-            new_dt = parse_dt(rec.get('sign_on_time'))
-            is_new_shift = False
-            if old_dt and new_dt:
-                if abs((old_dt - new_dt).total_seconds()) > 3600:
-                    is_new_shift = True
-            elif str(existing.get('sign_on_time') or '').strip() != str(rec.get('sign_on_time') or '').strip():
-                is_new_shift = True
-
-            if is_new_shift:
-                archive_to_duty_log(conn, crew_id)
-                conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
-                conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
-                # Reset found_in_ns so old duty's NS check doesn't carry over to new duty
-                conn.execute("UPDATE crew_records SET found_in_ns = 'no' WHERE crew_id = ?", (crew_id,))
-                has_manual_sub = False
-            else:
-                has_manual_sub = bool(sub)
-
-            if has_manual_sub:
-                conn.execute('''
-                    UPDATE crew_records SET duty_hrs = ?, sign_off_time = ?, synced_at = ?, is_active = 1
-                    WHERE crew_id = ?
-                ''', (rec.get('duty_hrs', ''), rec.get('sign_off_time', '-'), synced_at, crew_id))
-                skipped += 1
-            else:
-                conn.execute('''
-                    UPDATE crew_records
-                    SET name=?, desig=?, from_sttn=?, sign_on_time=?,
-                        to_sttn=?, sign_off_time=?, duty_hrs=?,
-                        route=?, loco_no=?, train_no=?, category=?,
-                        manually_edited=0, synced_at=?, is_active=1
-                    WHERE crew_id = ?
-                ''', (
-                    rec.get('name',''), rec.get('desig',''), rec.get('from_sttn',''), rec.get('sign_on_time',''),
-                    rec.get('to_sttn',''), rec.get('sign_off_time','-'), rec.get('duty_hrs',''), rec.get('route',''),
-                    rec.get('loco_no',''), rec.get('train_no',''), rec.get('category',''), synced_at, crew_id
-                ))
-                updated += 1
-        else:
-            # Brand new crew detected. Wipe any ancient stale data just in case.
-            conn.execute('DELETE FROM admin_edits WHERE crew_id = ?', (crew_id,))
-            conn.execute('DELETE FROM crew_submissions WHERE crew_id = ?', (crew_id,))
-                
-            conn.execute('''
-                INSERT INTO crew_records
-                    (crew_id, name, desig, from_sttn, sign_on_time, to_sttn,
-                     sign_off_time, duty_hrs, route, loco_no, train_no,
-                     category, manually_edited, synced_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                crew_id, rec.get('name',''), rec.get('desig',''), rec.get('from_sttn',''), rec.get('sign_on_time',''),
-                rec.get('to_sttn',''), rec.get('sign_off_time','-'), rec.get('duty_hrs',''), rec.get('route',''),
-                rec.get('loco_no',''), rec.get('train_no',''), rec.get('category',''), 0, synced_at
-            ))
-            inserted += 1
-
-        if i > 0 and i % 25 == 0:
-            conn.commit()
-
-    MISS_THRESHOLD = 2  # missed 2 consecutive syncs (~1hr, given 30-min scraper interval) = treat as signed off
-
-    payload_ids = set(payload.keys())
-    all_db = conn.execute('SELECT crew_id FROM crew_records').fetchall()
-    for i, row in enumerate(all_db):
-        cid = row['crew_id']
-        if cid not in payload_ids:
-            sub = conn.execute(
-                'SELECT id, ingest_miss_count FROM crew_submissions WHERE crew_id = ? ORDER BY submitted_at DESC LIMIT 1',
-                (cid,)
-            ).fetchone()
-            if sub:
-                new_miss_count = (sub['ingest_miss_count'] or 0) + 1
-                conn.execute('UPDATE crew_submissions SET ingest_miss_count = ? WHERE id = ?', (new_miss_count, sub['id']))
-                if new_miss_count >= MISS_THRESHOLD:
-                    conn.execute('''
-                        UPDATE crew_records
-                        SET sign_off_time = ?, synced_at = ?, is_active = 0
-                        WHERE crew_id = ? AND (sign_off_time IS NULL OR sign_off_time = '' OR sign_off_time = '-')
-                    ''', (synced_at, synced_at, cid))
-                    archive_to_duty_log(conn, cid, has_submission=1)
-            else:
-                archive_to_duty_log(conn, cid, has_submission=0)
-                conn.execute('UPDATE crew_records SET is_active = 0 WHERE crew_id = ?', (cid,))
-        else:
-            conn.execute('UPDATE crew_submissions SET ingest_miss_count = 0 WHERE crew_id = ?', (cid,))
-            
-        if i > 0 and i % 25 == 0:
-            conn.commit()
-        
-    conn.commit()
-    conn.close()
-    # Stamp last successful CMS sync time (shown on admin dashboard)
-    scraper_state['last_run'] = datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
-    return jsonify({'status': 'ok', 'inserted': inserted, 'updated': updated, 'protected': skipped})
+# For direct execution (dev server)
+app = create_app()
 
 if __name__ == '__main__':
-    init_db()
-    port = int(os.environ.get('PORT', 5000))
-    # use_reloader=False is critical: prevents double-spawning the scraper/cleanup threads
-    app.run(host='0.0.0.0', port=port, debug=app.config['DEBUG'], use_reloader=False)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

@@ -37,46 +37,50 @@
 
         <form method="POST" action="/admin/settings" class="space-y-6">
 
-            <!-- CMS Credentials Card -->
+            <!-- CMS Portal Credentials -->
             <div class="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
                 <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
-                    <h2 class="text-lg font-semibold text-gray-800">Scraper CMS Credentials</h2>
-                    <p class="text-sm text-gray-500 mt-1">Update the login details used by the background scraper.</p>
+                    <h2 class="text-lg font-semibold text-gray-800">CMS Portal Credentials</h2>
+                    <p class="text-sm text-gray-500 mt-1">Credentials are force-updated by CMS every 6 months. Daily OTP required (24hr validity).</p>
                 </div>
-                <div class="p-6 space-y-5">
+                <div class="p-6 space-y-4">
                     <div>
-                        <label for="cms_username" class="block text-sm font-medium text-gray-700">CMS Username</label>
-                        <input type="text" name="cms_username" id="cms_username" required
-                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2 border"
-                            value="{{ settings.cms_username if settings else '' }}">
+                        <label for="cms_username" class="block text-sm font-medium text-gray-700 mb-1">CMS Username</label>
+                        <input type="text" name="cms_username" id="cms_username"
+                            value="{{ settings.cms_username or '' }}"
+                            placeholder="Enter CMS portal username"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm">
                     </div>
                     <div>
-                        <label for="cms_password" class="block text-sm font-medium text-gray-700">CMS Password</label>
-                        <input type="password" name="cms_password" id="cms_password" required
-                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2 border"
-                            value="{{ settings.cms_password if settings else '' }}">
+                        <label for="cms_password" class="block text-sm font-medium text-gray-700 mb-1">CMS Password</label>
+                        <input type="password" name="cms_password" id="cms_password"
+                            value="{{ settings.cms_password or '' }}"
+                            placeholder="Enter CMS portal password"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm">
                     </div>
                 </div>
             </div>
 
-            <!-- RTIS Credentials Card -->
+            <!-- RTIS Portal Credentials -->
             <div class="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
                 <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
-                    <h2 class="text-lg font-semibold text-gray-800">Scraper RTIS Credentials</h2>
-                    <p class="text-sm text-gray-500 mt-1">Update the login details used by the RTIS background scraper.</p>
+                    <h2 class="text-lg font-semibold text-gray-800">RTIS Portal Credentials</h2>
+                    <p class="text-sm text-gray-500 mt-1">Used for live GPS locomotive tracking. Daily OTP required (24hr validity).</p>
                 </div>
-                <div class="p-6 space-y-5">
+                <div class="p-6 space-y-4">
                     <div>
-                        <label for="rtis_username" class="block text-sm font-medium text-gray-700">RTIS Username</label>
+                        <label for="rtis_username" class="block text-sm font-medium text-gray-700 mb-1">RTIS Username</label>
                         <input type="text" name="rtis_username" id="rtis_username"
-                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2 border"
-                            value="{{ settings.rtis_username if settings else '' }}">
+                            value="{{ settings.rtis_username or '' }}"
+                            placeholder="Enter RTIS portal username"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm">
                     </div>
                     <div>
-                        <label for="rtis_password" class="block text-sm font-medium text-gray-700">RTIS Password</label>
+                        <label for="rtis_password" class="block text-sm font-medium text-gray-700 mb-1">RTIS Password</label>
                         <input type="password" name="rtis_password" id="rtis_password"
-                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2 border"
-                            value="{{ settings.rtis_password if settings else '' }}">
+                            value="{{ settings.rtis_password or '' }}"
+                            placeholder="Enter RTIS portal password"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm">
                     </div>
                 </div>
             </div>

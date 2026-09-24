@@ -16,7 +16,9 @@ if os.path.exists(_env_file):
                 key, _, val = line.partition('=')
                 os.environ.setdefault(key.strip(), val.strip())
 
-from webapp.app import app, init_db
-
-# Initialise the database on first import (safe: uses CREATE TABLE IF NOT EXISTS)
-init_db()
+# Import the module-level app instance created by webapp.app's create_app().
+# Do NOT call create_app() again — the module-level call already initialises
+# the database and starts background threads.  A second call would be harmless
+# for init_db (idempotent) but the _threads_started guard in app.py now
+# prevents duplicate thread spawns regardless.
+from webapp.app import app  # noqa: F401

@@ -1,6 +1,8 @@
-import os, sys, time, datetime, base64, io, json, traceback, zoneinfo, socket, random, math, logging, sqlite3
+import os, sys, time, datetime, base64, io, json, traceback, zoneinfo, socket, random, math, logging, sqlite3, ssl
 from logging.handlers import RotatingFileHandler
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -9,7 +11,56 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
-from google.cloud import vision
+try:
+    from google.cloud import vision
+except ImportError:
+    vision = None   # GCP Vision OCR is optional; ddddocr is the local fallback
+
+# -----------------------------------------------------------------------------
+# SSL Adapter — Indian Railways TLS compatibility
+# -----------------------------------------------------------------------------
+# rtis.indianrail.gov.in rejects default Python/OpenSSL TLS negotiation on
+# Linux (SSLV3_ALERT_HANDSHAKE_FAILURE). Chrome succeeds because BoringSSL
+# enables a wider cipher set. This adapter explicitly enables those ciphers.
+
+class LaxSSLAdapter(HTTPAdapter):
+    """HTTPAdapter that enables legacy cipher suites required by Indian Railways servers."""
+
+    # Cipher string covers TLS 1.2 suites that IR servers accept, including
+    # RSA key exchange and ECDHE variants they may require.
+    _CIPHERS = (
+        "ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:"
+        "DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS"
+    )
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers=self._CIPHERS)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE            # IR certs sometimes chain poorly through SOCKS
+        ctx.set_ciphers(self._CIPHERS)
+        kwargs['ssl_context'] = ctx
+        super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        ctx = create_urllib3_context(ciphers=self._CIPHERS)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers(self._CIPHERS)
+        proxy_kwargs['ssl_context'] = ctx
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+
+def _make_rtis_session(proxy_host=None, proxy_port=None):
+    """Create a requests.Session pre-configured with LaxSSLAdapter and optional SOCKS proxy."""
+    s = requests.Session()
+    s.mount('https://', LaxSSLAdapter())
+    s.mount('http://', LaxSSLAdapter())
+    s.verify = False          # suppress cert-chain warnings to match above
+    if proxy_host:
+        proxy_url = f'socks5h://{proxy_host}:{proxy_port}'
+        s.proxies = {'http': proxy_url, 'https': proxy_url}
+    return s
+
 
 # -----------------------------------------------------------------------------
 # Timing & State Helpers
@@ -94,7 +145,9 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 # -----------------------------------------------------------------------------
 FLASK_API_URL = f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis"
 FLASK_BASE_URL = f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api"
-API_SECRET = os.environ.get('API_SECRET', 'cms-sync-secret-key-2026')
+API_SECRET = os.environ.get('API_SECRET')
+if not API_SECRET:
+    raise RuntimeError("FATAL: API_SECRET environment variable is not set. Scraper startup aborted.")
 IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 ACTIVE_TUNNEL = "Unknown"
 
@@ -138,18 +191,8 @@ if not GCP_CREDENTIALS:
         except: account_name = 'legacy_account'
         GCP_CREDENTIALS.append({'path': creds_path, 'name': account_name})
     else:
-        coolify_creds_path = os.path.join(BASE_DIR, 'scraper', 'gcp-creds.json')
-        if os.path.exists(coolify_creds_path):
-            try:
-                with open(coolify_creds_path) as f: account_name = json.load(f).get('project_id', 'coolify_account')
-            except: account_name = 'coolify_account'
-            GCP_CREDENTIALS.append({'path': coolify_creds_path, 'name': account_name})
-        else:
-            default_path = os.path.join(BASE_DIR, 'scraper', 'algebraic-cycle-432817-r8-ae9fa17cac37.json')
-            try:
-                with open(default_path) as f: account_name = json.load(f).get('project_id', 'default_account')
-            except: account_name = 'default_account'
-            GCP_CREDENTIALS.append({'path': default_path, 'name': account_name})
+        print("[RTIS] WARNING: No GCP_CREDENTIALS_B64 or GCP_CREDENTIALS_B64_N environment variable set. "
+              "Google Vision OCR tier will be unavailable. CAPTCHA fallback will use ddddocr only.", flush=True)
 
 # -----------------------------------------------------------------------------
 # Network / Proxy
@@ -165,10 +208,9 @@ def is_proxy_available(host, port, retries=2, delay=2):
             if attempt < retries - 1:
                 time.sleep(delay)
     if not port_open: return False
-    
+
     try:
-        test_session = requests.Session()
-        test_session.proxies = {'http': f'socks5h://{host}:{port}', 'https': f'socks5h://{host}:{port}'}
+        test_session = _make_rtis_session(proxy_host=host, proxy_port=port)
         resp = test_session.get('https://rtis.indianrail.gov.in/RTISDashboardUI/', timeout=10)
         return True
     except Exception:
@@ -231,10 +273,16 @@ def main_loop():
     print("[RTIS] Starting scraper...", flush=True)
     
     # We load ddddocr inside the subprocess to avoid multiprocessing fork issues
-    import ddddocr
-    import logging
-    logging.getLogger('ddddocr').setLevel(logging.WARNING)
-    ocr = ddddocr.DdddOcr(show_ad=False)
+    print("Initializing ddddocr...", flush=True)
+    try:
+        import ddddocr
+        import logging
+        logging.getLogger('ddddocr').setLevel(logging.WARNING)
+        ocr = ddddocr.DdddOcr(show_ad=False)
+        print("ddddocr initialized successfully.", flush=True)
+    except Exception as e:
+        print(f"[RTIS] Failed to initialize ddddocr: {e}. CAPTCHA solving will rely on admin manual input.", flush=True)
+        ocr = None
     
     consecutive_captcha_failures = 0
     consecutive_auth_failures = 0
@@ -250,7 +298,7 @@ def main_loop():
 
         # Rotate GCP Vision account daily
         current_date = datetime.datetime.now(IST).date()
-        if GCP_CREDENTIALS and last_vision_rotation_date != current_date:
+        if GCP_CREDENTIALS and vision and last_vision_rotation_date != current_date:
             active_index = current_date.toordinal() % len(GCP_CREDENTIALS)
             active_cred = GCP_CREDENTIALS[active_index]
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = active_cred['path']
@@ -350,7 +398,7 @@ def main_loop():
                         continue
                     consecutive_captcha_failures = 0  # reset on manual solve
                 else:
-                    if consecutive_captcha_failures < 5:
+                    if ocr and consecutive_captcha_failures < 5:
                         # Tier 1: ddddocr
                         send_state_to_admin('running', f'Solving RTIS Captcha via ddddocr (Attempt {consecutive_captcha_failures + 1}/5)...')
                         try:
@@ -359,7 +407,7 @@ def main_loop():
                         except Exception as e:
                             print(f"[RTIS] ddddocr failed: {e}")
 
-                    if not result and active_vision_client:
+                    if not result and active_vision_client and vision:
                         # Tier 2: Google Cloud Vision
                         if consecutive_captcha_failures == 5:
                             failure_time = datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')
@@ -523,7 +571,7 @@ def main_loop():
                 """)
 
             send_state_to_admin('running', f'Extracting auth token... {"Success" if bearer_token else "Failed"}')
-            print(f"[RTIS-DEBUG] Token retrieved: {str(bearer_token)[:50]}...", flush=True)
+            print(f"[RTIS-DEBUG] Token retrieved: {'Yes' if bearer_token else 'No'}", flush=True)
 
             if not bearer_token:
                 # Diagnostics: what IS in storage?
@@ -543,11 +591,9 @@ def main_loop():
             
             cookies = driver.get_cookies()
             print(f"[RTIS-DEBUG] Cookies retrieved: {[c['name'] for c in cookies]}", flush=True)
-            
-            # Create requests session for API calls
-            session = requests.Session()
-            if proxy_host:
-                session.proxies = {'http': f'socks5h://{proxy_host}:{proxy_port}', 'https': f'socks5h://{proxy_host}:{proxy_port}'}
+
+            # Create requests session for API calls with LaxSSL adapter for TLS compatibility
+            session = _make_rtis_session(proxy_host=proxy_host, proxy_port=proxy_port)
             for c in cookies: session.cookies.set(c['name'], c['value'])
             
             headers = {
@@ -583,7 +629,8 @@ def main_loop():
                 try:
                     resp = requests.get(
                         f"http://127.0.0.1:{os.environ.get('PORT', 5000)}/api/rtis/active_locos",
-                        headers={'X-API-Secret': API_SECRET}
+                        headers={'X-API-Secret': API_SECRET},
+                        timeout=15
                     )
                     loco_data = resp.json()
                     active_locos = loco_data.get('locos', [])
@@ -641,7 +688,6 @@ def main_loop():
                                 json=payload, headers=headers, timeout=15
                             )
                             logger.info(f"  RTIS HTTP {resp.status_code}")
-                            logger.debug(f"  RTIS raw response: {resp.text[:600]}")
 
                             if resp.status_code == 200:
                                 try:
@@ -652,7 +698,6 @@ def main_loop():
                                     continue
 
                                 live_data = data.get('locoLiveData')
-                                logger.debug(f"  locoLiveData: {live_data}")
 
                                 # ── Check sameDiv / movedIn / movedOut ──────
                                 same_div  = data.get('sameDiv', [])
@@ -717,7 +762,6 @@ def main_loop():
                                         "location_name": stn,
                                         "moved_gt_100m": moved_gt_100m
                                     }
-                                    logger.debug(f"  sync_loco payload: {sync_payload}")
 
                                     try:
                                         sync_resp = requests.post(
@@ -759,7 +803,10 @@ def main_loop():
 
                         if human_delay(1, 3): break
 
-                requests.post(f"{FLASK_API_URL}/state", json={'last_run': datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')}, headers={'X-API-Secret': API_SECRET})
+                try:
+                    requests.post(f"{FLASK_API_URL}/state", json={'last_run': datetime.datetime.now(IST).strftime('%d/%m/%y %H:%M:%S IST')}, headers={'X-API-Secret': API_SECRET}, timeout=5)
+                except Exception:
+                    pass
                 
                 if token_expired:
                     logger.info("Token expired. Quitting driver to trigger full re-authentication...")
