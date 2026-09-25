@@ -336,6 +336,89 @@ def api_sync_ta():
     return jsonify({'status': 'success', 'count': len(payload)})
 
 
+@api_internal_bp.route('/api/sync_cli_movements', methods=['POST'])
+def api_sync_cli_movements():
+    """Sync CLI movement data from CMS scraper."""
+    if not require_api_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True)
+    if not payload or not isinstance(payload, list):
+        return jsonify({'error': 'Invalid payload'}), 400
+
+    conn = get_db()
+    fetched_at = datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')
+
+    for i, rec in enumerate(payload):
+        cli_id = rec.get('cli_id')
+        if not cli_id:
+            continue
+
+        name = rec.get('name', '')
+        hq_code = rec.get('hq_code', '')
+        departure_entry_datetime = rec.get('departure_entry_datetime', '')
+        departure_datetime = rec.get('departure_datetime', '')
+        from_station = rec.get('from_station', '')
+        via = rec.get('via', '')
+        to_station = rec.get('to_station', '')
+        arrival_entry_datetime = rec.get('arrival_entry_datetime', '')
+        arrival_datetime = rec.get('arrival_datetime', '')
+        train_no = rec.get('train_no', '')
+        loco_no = rec.get('loco_no', '')
+        authority = rec.get('authority', '')
+        duty_type = rec.get('duty_type', '')
+        service_type = rec.get('service_type', '')
+        purpose = rec.get('purpose', '')
+        entry_mode = rec.get('entry_mode', '')
+        remarks = rec.get('remarks', '')
+        from_lat = rec.get('from_lat', 0.0)
+        from_lon = rec.get('from_lon', 0.0)
+        to_lat = rec.get('to_lat', 0.0)
+        to_lon = rec.get('to_lon', 0.0)
+
+        conn.execute('''
+            INSERT INTO cli_movements (
+                cli_id, name, hq_code, departure_entry_datetime, departure_datetime,
+                from_station, via, to_station, arrival_entry_datetime, arrival_datetime,
+                train_no, loco_no, authority, duty_type, service_type, purpose,
+                entry_mode, remarks, fetched_at, from_lat, from_lon, to_lat, to_lon
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cli_id) DO UPDATE SET
+                name=excluded.name,
+                hq_code=excluded.hq_code,
+                departure_entry_datetime=excluded.departure_entry_datetime,
+                departure_datetime=excluded.departure_datetime,
+                from_station=excluded.from_station,
+                via=excluded.via,
+                to_station=excluded.to_station,
+                arrival_entry_datetime=excluded.arrival_entry_datetime,
+                arrival_datetime=excluded.arrival_datetime,
+                train_no=excluded.train_no,
+                loco_no=excluded.loco_no,
+                authority=excluded.authority,
+                duty_type=excluded.duty_type,
+                service_type=excluded.service_type,
+                purpose=excluded.purpose,
+                entry_mode=excluded.entry_mode,
+                remarks=excluded.remarks,
+                fetched_at=excluded.fetched_at,
+                from_lat=excluded.from_lat,
+                from_lon=excluded.from_lon,
+                to_lat=excluded.to_lat,
+                to_lon=excluded.to_lon
+        ''', (cli_id, name, hq_code, departure_entry_datetime, departure_datetime,
+              from_station, via, to_station, arrival_entry_datetime, arrival_datetime,
+              train_no, loco_no, authority, duty_type, service_type, purpose,
+              entry_mode, remarks, fetched_at, from_lat, from_lon, to_lat, to_lon))
+
+        if i > 0 and i % 50 == 0:
+            conn.commit()
+
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'success', 'count': len(payload)})
+
+
 # ---------------------------------------------------------------------------
 # Full CMS Sync with Shift Detection
 # ---------------------------------------------------------------------------

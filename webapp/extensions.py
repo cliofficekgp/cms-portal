@@ -69,3 +69,11 @@ rtis_state = {
 # Global process handles (set by threads.py, accessed by admin routes)
 scraper_process = None
 rtis_process = None
+
+# Global state for CLI Movement scraper
+cli_state = {
+    'status': 'idle',
+    'message': 'Waiting for next sync cycle...',
+    'last_run': None,
+    'last_count': 0
+}

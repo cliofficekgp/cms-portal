@@ -292,6 +292,34 @@ def init_db():
         )
     ''')
 
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS cli_movements (
+            cli_id TEXT PRIMARY KEY,
+            name TEXT,
+            hq_code TEXT,
+            departure_entry_datetime TEXT,
+            departure_datetime TEXT,
+            from_station TEXT,
+            via TEXT,
+            to_station TEXT,
+            arrival_entry_datetime TEXT,
+            arrival_datetime TEXT,
+            train_no TEXT,
+            loco_no TEXT,
+            authority TEXT,
+            duty_type TEXT,
+            service_type TEXT,
+            purpose TEXT,
+            entry_mode TEXT,
+            remarks TEXT,
+            fetched_at TEXT,
+            from_lat REAL,
+            from_lon REAL,
+            to_lat REAL,
+            to_lon REAL
+        )
+    ''')
+
     # Bootstrap default super_admin if no users exist (secure first-run only)
     user_count = cur.execute('SELECT COUNT(*) FROM users').fetchone()[0]
     if user_count == 0:

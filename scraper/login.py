@@ -414,6 +414,144 @@ def sync_ta_reports(session_obj):
         
     return False
 
+def sync_cli_movements(session_obj):
+    """Fetch CLI Movement Dashboard data and sync to backend."""
+    send_state_to_admin('running', 'Fetching CLI Movement Dashboard...')
+
+    # Build XML payload for CLI Movement Dashboard
+    xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?><CMSPublishXML baseLanguage="string" transLanguage="string"><CMSREPORT action="REP" relationship="string" transLanguage="string"><zone>SER</zone><division>KGP</division><lobby>KGP</lobby><currentReportName><![CDATA[CLI Movement Dashboard]]></currentReportName><desig1>false</desig1><desig2>false</desig2><desig3>LPG</desig3><desig4>false</desig4><desig5>false</desig5><desig6>false</desig6><desig7>false</desig7><desig8>false</desig8><desig9>false</desig9><desig10>false</desig10><desig11>false</desig11><desig12>false</desig12><abnormality1>COMMERCIAL</abnormality1><abnormality2>false</abnormality2><abnormality3>false</abnormality3><abnormality4>false</abnormality4><abnormality5>false</abnormality5><abnormality6>false</abnormality6><abnormality7>false</abnormality7><abnormality8>false</abnormality8><abnormality9>false</abnormality9><abnormality10>false</abnormality10><abnormality11>false</abnormality11><abnormality12>false</abnormality12><abnormality13>false</abnormality13><startingDate></startingDate><endDate></endDate><monthYearDateFormat></monthYearDateFormat><msgSrc>CS</msgSrc><traction>ALL</traction><cadre>E','M','B</cadre><fghtCochSht>FghtCoch</fghtCochSht><designation>PILOT</designation><active>Active</active><rlevel>LOBBY</rlevel><durationtype>FORTNIGHT</durationtype><combALP>COMB</combALP><slotData>not Slot Data</slotData><desigSelect>OFFICIATING</desigSelect><crewAvailableCheckList>CrewAvailableFIFO</crewAvailableCheckList><contValue>Continuous</contValue><mandatoryRequirementDueFilter>Reft</mandatoryRequirementDueFilter><signOnOFFVal>SignOnVal</signOnOFFVal><locoTraction>ALL</locoTraction><cont_NoncontValue>ContinuousHQ</cont_NoncontValue><contValueOption>SignOnOff</contValueOption><spare>spare</spare><crewHqSignOffSttn>asPerCrewHq</crewHqSignOffSttn><crewBAStatus>SIGNON</crewBAStatus><crewhq>HQ crew at HQ</crewhq><crewIDBaseID>CrewID</crewIDBaseID><crewDesgLevel>Goods</crewDesgLevel><currentMidnignt>CURRENT</currentMidnignt><abnormalityStatus>PN</abnormalityStatus><cadreFilter>notCadre</cadreFilter><year1></year1><crewBookingWrWorWise>CallBookLobbyWise</crewBookingWrWorWise><month1></month1><slotFilter>Previous</slotFilter><preodicCoursesVal>DONE</preodicCoursesVal><detailLevel>Detail</detailLevel><locoGroupVal>ELEC-CONV</locoGroupVal><time>4</time><dutyType>WR</dutyType><locoTypeWiseVal>Group</locoTypeWiseVal><reportGroupVal>Lobby</reportGroupVal><dfccRadio>ALL</dfccRadio><abnormalityNil>NOT_NIL</abnormalityNil><bmbsRadio>ALL</bmbsRadio><prRportType>realTime</prRportType><serviceTypeInput>ALL</serviceTypeInput><quizResultTypeVal>CategoryWise</quizResultTypeVal><fromSttn>null</fromSttn><toSttn>null</toSttn><slotValueCombo>Slot</slotValueCombo><locoNosearch></locoNosearch><monthCombo>Previous</monthCombo><monthComboValueText>Previous</monthComboValueText><indexValue>0</indexValue><slotValueText>Slot</slotValueText><route>- - -Route- - -</route><auCode>- - Select - -</auCode><weekDates>- - Select - -</weekDates><routename>- - Route- - -</routename><fromSttnNameRoute></fromSttnNameRoute><toSttnNameRoute></toSttnNameRoute><trainingValue>- - Select - -</trainingValue><trackCoverage>ALL</trackCoverage></CMSREPORT></CMSPublishXML>"""
+
+    url = 'https://cms.indianrail.gov.in/CMSREPORT/JSPRWD/rpt/management/LIMovementDashboard.do?hmode=LIMovementDashboard'
+    headers = {
+        'Accept': 'text/html, */*; q=0.01',
+        'Origin': 'https://cms.indianrail.gov.in',
+        'Referer': 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=skipMapHrmsId&isResponsive=Y',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+    }
+
+    data = {'XML': xml_payload, 'lobby': 'KGP', 'lobbyList': 'SER-KGP-KGP'}
+
+    try:
+        resp = session_obj.post(url, headers=headers, data=data, timeout=30)
+        if resp.status_code == 200:
+            resp_text_lower = resp.text.lower()
+            # Detect stale/expired session
+            if "session expire page" in resp_text_lower or "loginform" in resp_text_lower or "jcaptcha" in resp_text_lower:
+                print("CLI Movement Sync: session expired/invalid (login page returned)")
+                return False
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            table = soup.find('table', id='liMovementDashboard')
+            if not table:
+                print("CLI Movement Sync: 'liMovementDashboard' table not found in response")
+                return False
+
+            tbody = table.find('tbody')
+            if not tbody:
+                print("CLI Movement Sync: table found but no <tbody>")
+                return False
+
+            cli_records = []
+            for row in tbody.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) < 19:
+                    continue
+
+                # Parse columns (0-indexed):
+                # [0] S.No, [1] CLI ID, [2] Name, [3] HQ Code,
+                # [4] Departure Entry Date/Time, [5] Departure Date/Time,
+                # [6] From Station, [7] Via, [8] To Station,
+                # [9] Arrival Entry Date/Time, [10] Arrival Date/Time,
+                # [11] Train No, [12] Loco No, [13] Authority,
+                # [14] Duty Type, [15] Service Type, [16] Purpose,
+                # [17] Entry Mode, [18] Remarks
+
+                cli_id = cols[1].text.strip()
+                name = cols[2].text.strip()
+
+                if not cli_id or not name:
+                    continue
+
+                # Extract from_station and to_station text content
+                from_station_td = cols[6]
+                to_station_td = cols[8]
+
+                from_station_text = from_station_td.get_text(strip=True)
+                to_station_text = to_station_td.get_text(strip=True)
+
+                # Filter: discard rows where BOTH from and to contain "null"
+                if "null" in from_station_text.lower() and "null" in to_station_text.lower():
+                    continue
+
+                # Extract lat/lon from title attributes
+                from_lat, from_lon = 0.0, 0.0
+                to_lat, to_lon = 0.0, 0.0
+
+                from_title = from_station_td.get('title', '')
+                if 'lat=' in from_title and 'lon=' in from_title:
+                    try:
+                        lat_part = from_title.split('lat=')[1].split('&')[0]
+                        lon_part = from_title.split('lon=')[1]
+                        from_lat = float(lat_part)
+                        from_lon = float(lon_part)
+                    except: pass
+
+                to_title = to_station_td.get('title', '')
+                if 'lat=' in to_title and 'lon=' in to_title:
+                    try:
+                        lat_part = to_title.split('lat=')[1].split('&')[0]
+                        lon_part = to_title.split('lon=')[1]
+                        to_lat = float(lat_part)
+                        to_lon = float(lon_part)
+                    except: pass
+
+                cli_records.append({
+                    'cli_id': cli_id,
+                    'name': name,
+                    'hq_code': cols[3].text.strip(),
+                    'departure_entry_datetime': cols[4].text.strip(),
+                    'departure_datetime': cols[5].text.strip(),
+                    'from_station': from_station_text,
+                    'via': cols[7].text.strip(),
+                    'to_station': to_station_text,
+                    'arrival_entry_datetime': cols[9].text.strip(),
+                    'arrival_datetime': cols[10].text.strip(),
+                    'train_no': cols[11].text.strip(),
+                    'loco_no': cols[12].text.strip(),
+                    'authority': cols[13].text.strip(),
+                    'duty_type': cols[14].text.strip(),
+                    'service_type': cols[15].text.strip(),
+                    'purpose': cols[16].text.strip(),
+                    'entry_mode': cols[17].text.strip(),
+                    'remarks': cols[18].text.strip(),
+                    'from_lat': from_lat,
+                    'from_lon': from_lon,
+                    'to_lat': to_lat,
+                    'to_lon': to_lon
+                })
+
+            if cli_records:
+                send_state_to_admin('running', 'Syncing CLI movement data to backend DB...')
+                sync_resp = requests.post(
+                    f"{FLASK_API_URL}/sync_cli_movements",
+                    json=cli_records,
+                    headers={'X-API-Secret': API_SECRET},
+                    timeout=15
+                )
+                if sync_resp.status_code == 200:
+                    print(f"Successfully synced CLI movement data for {len(cli_records)} CLIs")
+                    return True
+                else:
+                    print(f"CLI Movement Sync API returned {sync_resp.status_code}: {sync_resp.text[:300]}")
+            else:
+                print("CLI Movement Sync: table found but produced 0 records after null filtering")
+
+    except Exception as e:
+        print(f"CLI Movement Sync failed: {e}")
+
+    return False
+
 # -----------------------------------------------------------------------------
 # Main Loop
 # -----------------------------------------------------------------------------
@@ -506,7 +644,12 @@ def main_loop():
                 ta_ok = sync_ta_reports(session)
                 if not ta_ok:
                     print("[main_loop] TA sync did not succeed this cycle (see sync_ta_reports logs above).")
-            
+
+            if cookie_valid:
+                cli_ok = sync_cli_movements(session)
+                if not cli_ok:
+                    print("[main_loop] CLI Movement sync did not succeed this cycle (see sync_cli_movements logs above).")
+
             if cookie_valid:
                 sleep_seconds = random_cycle_sleep_seconds(25, 35)
                 sleep_minutes = sleep_seconds / 60
@@ -825,6 +968,7 @@ def main_loop():
                 try:
                     signon_success = sync_signon_reports(session)
                     ta_success = sync_ta_reports(session)
+                    cli_success = sync_cli_movements(session)
                     break  # success — stop retrying
                 except requests.exceptions.ConnectionError as ce:
                     print(f"[Proxy] Post-login ConnectionError on tunnel attempt {tunnel_attempt + 1}: {ce}")
@@ -835,8 +979,8 @@ def main_loop():
                     else:
                         send_state_to_admin('error', 'Error: Cannot connect to CMS Server on any tunnel. The SOCKS proxies might be offline or CMS is down.')
                         break
-            
-            if signon_success or ta_success:
+
+            if signon_success or ta_success or cli_success:
                 sleep_seconds = random_cycle_sleep_seconds(25, 35)
                 sleep_minutes = sleep_seconds / 60
                 send_state_to_admin('sleeping', f'Sync successful. Sleeping for {sleep_minutes:.1f} minutes...')

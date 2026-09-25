@@ -283,3 +283,105 @@ def public_crew_list():
                            total_10_hrs=total_10_hrs,
                            total_12_hrs=total_12_hrs,
                            rtis_locations=rtis_locations)
+
+
+@crew_bp.route('/cli')
+def public_cli_dashboard():
+    """Public read-only CLI Movement Dashboard — no login required."""
+    from datetime import datetime
+    from webapp.extensions import IST
+
+    conn = get_db()
+    rows = conn.execute('SELECT * FROM cli_movements').fetchall()
+    conn.close()
+
+    now = datetime.now(IST)
+    cli_data = []
+    total_day = 0
+    total_night = 0
+    last_updated = None
+
+    for row in rows:
+        # Parse datetimes
+        departure_dt = None
+        arrival_dt = None
+        try:
+            if row['departure_datetime'] and row['departure_datetime'] != '-':
+                departure_dt = datetime.strptime(row['departure_datetime'], '%d-%m-%Y %H:%M')
+        except: pass
+
+        try:
+            if row['arrival_datetime'] and row['arrival_datetime'] != '-':
+                arrival_dt = datetime.strptime(row['arrival_datetime'], '%d-%m-%Y %H:%M')
+        except: pass
+
+        # Duty Status: ON DUTY if to_station contains "(NA)", else AVAILABLE
+        to_station = row['to_station'] or ''
+        duty_status = 'ON DUTY' if '(NA)' in to_station else 'AVAILABLE'
+
+        # AT field
+        from_station = row['from_station'] or ''
+        if duty_status == 'ON DUTY':
+            at_field = f"{from_station}--{to_station}"
+        else:
+            # AVAILABLE: show the current station (the one marked completed)
+            at_field = to_station if to_station else from_station
+
+        # REST HRS / ON DUTY HRS
+        rest_hrs = ''
+        on_duty_hrs = ''
+        if duty_status == 'AVAILABLE' and arrival_dt:
+            delta = now - arrival_dt
+            hours = delta.total_seconds() / 3600
+            rest_hrs = f"{hours:.1f}"
+        elif duty_status == 'ON DUTY' and departure_dt:
+            delta = now - departure_dt
+            hours = delta.total_seconds() / 3600
+            on_duty_hrs = f"{hours:.1f}"
+
+        # DAY/NIGHT classification
+        day_night = 'DAY'
+        if departure_dt and (22 <= departure_dt.hour or departure_dt.hour < 4):
+            day_night = 'NIGHT'
+        elif arrival_dt and (22 <= arrival_dt.hour or arrival_dt.hour < 4):
+            day_night = 'NIGHT'
+
+        if day_night == 'DAY':
+            total_day += 1
+        else:
+            total_night += 1
+
+        cli_data.append({
+            'cli_id': row['cli_id'],
+            'name': row['name'],
+            'hq_code': row['hq_code'],
+            'duty_status': duty_status,
+            'at': at_field,
+            'rest_hrs': rest_hrs,
+            'on_duty_hrs': on_duty_hrs,
+            'day_night': day_night,
+            'from_station': from_station,
+            'to_station': to_station,
+            'train_no': row['train_no'],
+            'loco_no': row['loco_no']
+        })
+
+        # Track last updated
+        if row['fetched_at']:
+            if not last_updated or row['fetched_at'] > last_updated:
+                last_updated = row['fetched_at']
+
+    # Group by HQ
+    hq_groups = {}
+    for cli in cli_data:
+        hq = cli['hq_code']
+        if hq not in hq_groups:
+            hq_groups[hq] = []
+        hq_groups[hq].append(cli)
+
+    return render_template('cli_dashboard.html',
+                           cli_data=cli_data,
+                           hq_groups=hq_groups,
+                           total_day=total_day,
+                           total_night=total_night,
+                           last_updated=last_updated or 'Never')

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>KGP Division - CLI Movement Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+        body{font-family:'Inter',sans-serif;background:#0f172a;min-height:100vh;color:#e2e8f0;font-size:13px;}
+        .page-wrapper{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+        /* HEADER */
+        .header{background:linear-gradient(135deg,#581c87 0%,#7c3aed 50%,#a855f7 100%);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,.45);border-bottom:1px solid rgba(255,255,255,.1);}
+        .header-left{display:flex;flex-direction:column;gap:2px;}
+        .header-title{font-size:15px;font-weight:800;color:#fff;display:flex;align-items:center;gap:8px;}
+        .header-subtitle{font-size:10px;color:#e9d5ff;letter-spacing:.04em;}
+        .header-center{display:flex;align-items:center;flex:1;max-width:320px;margin:0 auto;}
+        .search-wrap{position:relative;width:100%;}
+        .search-icon{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:#e9d5ff;pointer-events:none;}
+        .search-input{width:100%;padding:6px 8px 6px 28px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;font-size:12px;font-family:inherit;outline:none;}
+        .search-input::placeholder{color:#e9d5ff;}
+        .search-input:focus{background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.4);}
+        .header-right{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+        .view-badge{font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;background:rgba(34,197,94,.2);color:#86efac;border:1px solid rgba(34,197,94,.35);letter-spacing:.06em;}
+        .live-clock{font-size:12px;font-weight:600;color:#e9d5ff;background:rgba(255,255,255,.08);padding:4px 10px;border-radius:8px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+        .auto-refresh-badge{font-size:10px;color:#c4b5fd;background:rgba(196,181,253,.1);padding:4px 9px;border-radius:6px;white-space:nowrap;}
+        /* STATS */
+        .stats-bar{background:#1e293b;padding:5px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;flex-shrink:0;flex-wrap:wrap;gap:8px;}
+        .stats-group{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+        .stat-item{display:flex;align-items:center;gap:5px;font-size:11px;}
+        .stat-label{color:#64748b;font-weight:600;letter-spacing:.04em;}
+        .stat-val{color:#e2e8f0;font-size:13px;font-weight:700;}
+        .stat-val.amber{color:#fbbf24;}
+        /* HQ FILTER */
+        .hq-bar{background:#162032;padding:5px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;border-bottom:1px solid #253350;flex-wrap:wrap;}
+        .hq-bar-label{font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;white-space:nowrap;}
+        .hq-chip{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;cursor:pointer;user-select:none;border:1.5px solid #334155;color:#94a3b8;background:transparent;transition:all .18s;white-space:nowrap;}
+        .hq-chip:hover{border-color:#a855f7;color:#e2e8f0;}
+        .hq-chip.active{border-color:#a855f7;background:rgba(168,85,247,.18);color:#e9d5ff;}
+        .hq-chip-all.active{border-color:#22c55e;background:rgba(34,197,94,.15);color:#86efac;}
+        .hq-chip-kgp.active{border-color:#818cf8;background:rgba(129,140,248,.18);color:#c7d2fe;}
+        .hq-chip-nmp.active{border-color:#fb923c;background:rgba(251,146,60,.18);color:#fed7aa;}
+        .hq-chip-bls.active{border-color:#2dd4bf;background:rgba(45,212,191,.18);color:#99f6e4;}
+        .hq-chip-adl.active{border-color:#a3e635;background:rgba(163,230,53,.18);color:#d9f99d;}
+        .hq-chip-src.active{border-color:#fbbf24;background:rgba(251,191,36,.18);color:#fde68a;}
+        .hq-chip-tpkr.active{border-color:#f87171;background:rgba(248,113,113,.18);color:#fecaca;}
+        /* TABLE */
+        .table-wrap{overflow:auto;flex:1;}
+        table{width:100%;border-collapse:collapse;}
+        thead{position:sticky;top:0;z-index:20;}
+        thead tr{background:#1e293b;}
+        th{padding:6px 5px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;white-space:nowrap;border-bottom:2px solid #334155;cursor:pointer;user-select:none;}
+        th:hover{color:#e2e8f0;background:#263347;}
+        th.sorted-asc::after{content:" ▲";font-size:8px;color:#a855f7;}
+        th.sorted-desc::after{content:" ▼";font-size:8px;color:#a855f7;}
+        tbody tr{border-bottom:1px solid #334155;transition:background .12s;}
+        tbody tr:hover{background:rgba(88,28,135,.22) !important;}
+        tbody tr.row-onduty{background:rgba(59,130,246,.09) !important;}
+        tbody tr.row-available{background:rgba(34,197,94,.06) !important;}
+        td{padding:4px 5px;color:#cbd5e1;white-space:nowrap;vertical-align:middle;}
+        td.cli-id-cell{font-weight:700;color:#e2e8f0;}
+        td.name-cell{max-width:130px;overflow:hidden;text-overflow:ellipsis;}
+        .td-center{text-align:center;}
+        /* DUTY STATUS */
+        .duty-badge{font-weight:700;border-radius:4px;padding:2px 8px;text-align:center;font-size:11px;display:inline-block;}
+        .duty-onduty{background:#1e3a8a;color:#93c5fd;}
+        .duty-available{background:#14532d;color:#86efac;}
+        /* DAY/NIGHT */
+        .daynight-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:12px;}
+        .daynight-day{background:rgba(226,232,240,.12);color:#e2e8f0;}
+        .daynight-night{background:rgba(251,191,36,.2);color:#fbbf24;}
+        /* HRS */
+        .hrs-val{color:#60a5fa;font-weight:700;}
+        .empty-row td{text-align:center;color:#475569;padding:40px;}
+        ::-webkit-scrollbar{width:5px;height:5px;}
+        ::-webkit-scrollbar-track{background:#0f172a;}
+        ::-webkit-scrollbar-thumb{background:#334155;border-radius:3px;}
+        ::-webkit-scrollbar-thumb:hover{background:#475569;}
+        .readonly-banner{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,.88);border:1px solid #334155;border-radius:20px;padding:4px 16px;font-size:10px;color:#475569;pointer-events:none;z-index:9999;white-space:nowrap;}
+    </style>
+</head>
+<body>
+<div class="page-wrapper">
+    <!-- HEADER -->
+    <div class="header">
+        <div class="header-left">
+            <div class="header-title">
+                <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                </svg>
+                KGP Division &mdash; CLI Movement Dashboard
+            </div>
+            <div class="header-subtitle">CHIEF LOCO INSPECTOR DUTY TRACKING &middot; REAL TIME &middot; READ ONLY</div>
+        </div>
+        <div class="header-center">
+            <div class="search-wrap">
+                <svg class="search-icon" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
+                </svg>
+                <input type="text" id="searchInput" class="search-input" placeholder="Search CLI ID or name...">
+            </div>
+        </div>
+        <div class="header-right">
+            <span class="view-badge">VIEW ONLY</span>
+            <span class="live-clock" id="liveClock">--:--:--</span>
+            <span class="auto-refresh-badge" id="refreshBadge">Refresh in 5:00</span>
+        </div>
+    </div>
+
+    <!-- STATS BAR -->
+    <div class="stats-bar">
+        <div class="stats-group">
+            <div class="stat-item"><span class="stat-label">TOTAL DAY:</span><span class="stat-val">{{ total_day }}</span></div>
+            <div class="stat-item"><span class="stat-label">TOTAL NIGHT:</span><span class="stat-val amber">{{ total_night }}</span></div>
+            <div class="stat-item"><span class="stat-label">LAST UPDATED:</span><span class="stat-val" style="font-size:11px;">{{ last_updated }}</span></div>
+        </div>
+    </div>
+
+    <!-- HQ FILTER -->
+    <div class="hq-bar" id="hqBar">
+        <span class="hq-bar-label">HQ:</span>
+        <span class="hq-chip hq-chip-all active" data-hq="ALL">ALL</span>
+        <span class="hq-chip hq-chip-adl" data-hq="ADL">ADL</span>
+        <span class="hq-chip hq-chip-bls" data-hq="BLS">BLS</span>
+        <span class="hq-chip hq-chip-kgp" data-hq="KGP">KGP</span>
+        <span class="hq-chip hq-chip-nmp" data-hq="NMP">NMP</span>
+        <span class="hq-chip hq-chip-src" data-hq="SRC">SRC</span>
+        <span class="hq-chip hq-chip-tpkr" data-hq="TPKR">TPKR</span>
+    </div>
+
+    <!-- TABLE -->
+    <div class="table-wrap">
+        <table id="cliTable">
+            <thead>
+                <tr>
+                    <th data-col="hq_code">HQ</th>
+                    <th data-col="cli_id">CLI ID</th>
+                    <th data-col="name">Name</th>
+                    <th data-col="duty_status">Duty Status</th>
+                    <th data-col="at">AT</th>
+                    <th data-col="rest_hrs">Rest Hrs</th>
+                    <th data-col="on_duty_hrs">On Duty Hrs</th>
+                    <th data-col="day_night">Day/Night</th>
+                </tr>
+            </thead>
+            <tbody id="cliTableBody">
+                {% if cli_data %}
+                    {% for cli in cli_data %}
+                    <tr class="row-{{ 'onduty' if cli.duty_status == 'ON DUTY' else 'available' }}" data-hq="{{ cli.hq_code }}">
+                        <td class="td-center">{{ cli.hq_code }}</td>
+                        <td class="cli-id-cell">{{ cli.cli_id }}</td>
+                        <td class="name-cell">{{ cli.name }}</td>
+                        <td class="td-center">
+                            <span class="duty-badge duty-{{ 'onduty' if cli.duty_status == 'ON DUTY' else 'available' }}">{{ cli.duty_status }}</span>
+                        </td>
+                        <td>{{ cli.at }}</td>
+                        <td class="td-center">
+                            {% if cli.rest_hrs %}
+                            <span class="hrs-val">{{ cli.rest_hrs }}</span>
+                            {% else %}
+                            <span style="color:#475569;">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="td-center">
+                            {% if cli.on_duty_hrs %}
+                            <span class="hrs-val">{{ cli.on_duty_hrs }}</span>
+                            {% else %}
+                            <span style="color:#475569;">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="td-center">
+                            <span class="daynight-badge daynight-{{ cli.day_night.lower() }}">{{ cli.day_night }}</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr class="empty-row">
+                        <td colspan="8">No CLI movement data available</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="readonly-banner">READ-ONLY DASHBOARD • AUTO-REFRESH EVERY 5 MIN</div>
+
+<script>
+// Live clock
+function updateClock() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('liveClock').textContent = `${h}:${m}:${s}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Auto-refresh countdown (5 minutes)
+let countdown = 300;
+function updateRefreshBadge() {
+    const min = Math.floor(countdown / 60);
+    const sec = countdown % 60;
+    document.getElementById('refreshBadge').textContent = `Refresh in ${min}:${String(sec).padStart(2, '0')}`;
+    countdown--;
+    if (countdown < 0) {
+        location.reload();
+    }
+}
+setInterval(updateRefreshBadge, 1000);
+updateRefreshBadge();
+
+// HQ filter
+const hqChips = document.querySelectorAll('.hq-chip');
+const tableRows = document.querySelectorAll('#cliTableBody tr:not(.empty-row)');
+
+hqChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+        hqChips.forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        const selectedHq = chip.dataset.hq;
+
+        tableRows.forEach(row => {
+            if (selectedHq === 'ALL' || row.dataset.hq === selectedHq) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    });
+});
+
+// Search filter
+const searchInput = document.getElementById('searchInput');
+searchInput.addEventListener('input', (e) => {
+    const query = e.target.value.toLowerCase();
+    tableRows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        if (text.includes(query)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+});
+
+// Table sorting
+const headers = document.querySelectorAll('th[data-col]');
+let sortState = {};
+
+headers.forEach(header => {
+    header.addEventListener('click', () => {
+        const col = header.dataset.col;
+        const isAsc = sortState[col] === 'asc';
+
+        headers.forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+        header.classList.add(isAsc ? 'sorted-desc' : 'sorted-asc');
+        sortState = { [col]: isAsc ? 'desc' : 'asc' };
+
+        const tbody = document.getElementById('cliTableBody');
+        const rows = Array.from(tbody.querySelectorAll('tr:not(.empty-row)'));
+
+        rows.sort((a, b) => {
+            const aText = a.querySelector(`td:nth-child(${Array.from(headers).indexOf(header) + 1})`).textContent.trim();
+            const bText = b.querySelector(`td:nth-child(${Array.from(headers).indexOf(header) + 1})`).textContent.trim();
+
+            if (col === 'rest_hrs' || col === 'on_duty_hrs') {
+                const aVal = parseFloat(aText) || 0;
+                const bVal = parseFloat(bText) || 0;
+                return isAsc ? bVal - aVal : aVal - bVal;
+            }
+
+            return isAsc ? bText.localeCompare(aText) : aText.localeCompare(bText);
+        });
+
+        rows.forEach(row => tbody.appendChild(row));
+    });
+});
+</script>
+</body>
+</html>
