@@ -139,6 +139,8 @@
                     <th data-col="name">Name</th>
                     <th data-col="duty_status">Duty Status</th>
                     <th data-col="at">AT</th>
+                    <th data-col="train_no">Train No</th>
+                    <th data-col="loco_no">Loco No</th>
                     <th data-col="rest_hrs">Rest Hrs</th>
                     <th data-col="on_duty_hrs">On Duty Hrs</th>
                     <th data-col="day_night">Day/Night</th>
@@ -159,6 +161,16 @@
                             <span class="duty-badge duty-{{ 'onduty' if cli.duty_status == 'ON DUTY' else 'available' }}">{{ cli.duty_status }}</span>
                         </td>
                         <td>{{ cli.at }}</td>
+                        <td class="td-center" style="font-weight:600;color:#cbd5e1;">{{ cli.train_no if cli.train_no else '—' }}</td>
+                        <td style="font-weight:600;color:#e2e8f0;">
+                            {{ cli.loco_no if cli.loco_no else '—' }}
+                            {% if cli.rtis_loc %}
+                            <div class="rtis-hint">
+                                <svg width="9" height="9" viewBox="0 0 20 20" fill="currentColor" style="flex-shrink:0;"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
+                                <span style="color:#60a5fa;">{{ cli.rtis_loc }}</span>
+                            </div>
+                            {% endif %}
+                        </td>
                         <td class="td-center">
                             {% if cli.rest_hrs %}
                             <span class="hrs-val">{{ cli.rest_hrs }}</span>

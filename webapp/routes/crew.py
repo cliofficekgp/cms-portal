@@ -293,6 +293,22 @@ def public_cli_dashboard():
 
     conn = get_db()
     rows = conn.execute('SELECT * FROM cli_movements').fetchall()
+
+    # Fetch RTIS loco locations
+    try:
+        loco_locs = conn.execute("SELECT loco_no, latitude, longitude, location_name, updated_at FROM loco_locations").fetchall()
+        rtis_locations = {}
+        for l in loco_locs:
+            rtis_locations[l['loco_no']] = {
+                'lat': l['latitude'],
+                'lon': l['longitude'],
+                'loc': l['location_name'],
+                'time': l['updated_at']
+            }
+    except Exception as e:
+        print(f"Error fetching loco locations for CLI dashboard: {e}")
+        rtis_locations = {}
+
     conn.close()
 
     now = datetime.now(IST)
@@ -353,6 +369,14 @@ def public_cli_dashboard():
         else:
             total_night += 1
 
+        # Get RTIS location for loco (if available and CLI is on duty)
+        loco_no = row['loco_no'] or ''
+        rtis_loc = None
+        rtis_loc_time = None
+        if loco_no and duty_status == 'ON DUTY' and loco_no in rtis_locations:
+            rtis_loc = rtis_locations[loco_no]['loc']
+            rtis_loc_time = rtis_locations[loco_no]['time']
+
         cli_data.append({
             'cli_id': row['cli_id'],
             'name': row['name'],
@@ -364,8 +388,10 @@ def public_cli_dashboard():
             'day_night': day_night,
             'from_station': from_station,
             'to_station': to_station,
-            'train_no': row['train_no'],
-            'loco_no': row['loco_no'],
+            'train_no': row['train_no'] or '',
+            'loco_no': loco_no,
+            'rtis_loc': rtis_loc,
+            'rtis_loc_time': rtis_loc_time,
             'authority': row['authority'] or '',
             'duty_type': row['duty_type'] or '',
             'purpose': row['purpose'] or '',
