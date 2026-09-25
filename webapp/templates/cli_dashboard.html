@@ -98,7 +98,7 @@
                 <svg class="search-icon" width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
                     <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
                 </svg>
-                <input type="text" id="searchInput" class="search-input" placeholder="Search CLI ID or name...">
+                <input type="text" id="searchInput" class="search-input" placeholder="Search CLI name...">
             </div>
         </div>
         <div class="header-right">
@@ -135,7 +135,6 @@
             <thead>
                 <tr>
                     <th data-col="hq_code">HQ</th>
-                    <th data-col="cli_id">CLI ID</th>
                     <th data-col="name">Name</th>
                     <th data-col="duty_status">Duty Status</th>
                     <th data-col="at">AT</th>
@@ -155,7 +154,6 @@
                     {% for cli in cli_data %}
                     <tr class="row-{{ 'onduty' if cli.duty_status == 'ON DUTY' else 'available' }}" data-hq="{{ cli.hq_code }}">
                         <td class="td-center">{{ cli.hq_code }}</td>
-                        <td class="cli-id-cell">{{ cli.cli_id }}</td>
                         <td class="name-cell">{{ cli.name }}</td>
                         <td class="td-center">
                             <span class="duty-badge duty-{{ 'onduty' if cli.duty_status == 'ON DUTY' else 'available' }}">{{ cli.duty_status }}</span>
