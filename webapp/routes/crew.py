@@ -365,7 +365,11 @@ def public_cli_dashboard():
             'from_station': from_station,
             'to_station': to_station,
             'train_no': row['train_no'],
-            'loco_no': row['loco_no']
+            'loco_no': row['loco_no'],
+            'authority': row['authority'] or '',
+            'duty_type': row['duty_type'] or '',
+            'purpose': row['purpose'] or '',
+            'remarks': row['remarks'] or ''
         })
 
         # Track last updated

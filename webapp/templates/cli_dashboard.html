@@ -142,6 +142,10 @@
                     <th data-col="rest_hrs">Rest Hrs</th>
                     <th data-col="on_duty_hrs">On Duty Hrs</th>
                     <th data-col="day_night">Day/Night</th>
+                    <th data-col="authority">Authority</th>
+                    <th data-col="duty_type">Duty Type</th>
+                    <th data-col="purpose">Purpose</th>
+                    <th data-col="remarks">Remarks</th>
                 </tr>
             </thead>
             <tbody id="cliTableBody">
@@ -172,6 +176,10 @@
                         <td class="td-center">
                             <span class="daynight-badge daynight-{{ cli.day_night.lower() }}">{{ cli.day_night }}</span>
                         </td>
+                        <td class="td-center" style="font-size:11px;color:#94a3b8;">{{ cli.authority if cli.authority else '—' }}</td>
+                        <td style="font-size:11px;color:#cbd5e1;">{{ cli.duty_type if cli.duty_type else '—' }}</td>
+                        <td class="name-cell" style="font-size:11px;color:#cbd5e1;max-width:150px;">{{ cli.purpose if cli.purpose else '—' }}</td>
+                        <td class="name-cell" style="font-size:11px;color:#94a3b8;max-width:180px;">{{ cli.remarks if cli.remarks else '—' }}</td>
                     </tr>
                     {% endfor %}
                 {% else %}
