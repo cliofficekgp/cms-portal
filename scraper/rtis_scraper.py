@@ -11,6 +11,11 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
+
+# Suppress SSL verification warnings (expected for Indian Railways RTIS portal)
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 try:
     from google.cloud import vision
 except ImportError:
