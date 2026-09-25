@@ -308,11 +308,13 @@ def public_cli_dashboard():
         try:
             if row['departure_datetime'] and row['departure_datetime'] != '-':
                 departure_dt = datetime.strptime(row['departure_datetime'], '%d-%m-%Y %H:%M')
+                departure_dt = departure_dt.replace(tzinfo=IST)
         except: pass
 
         try:
             if row['arrival_datetime'] and row['arrival_datetime'] != '-':
                 arrival_dt = datetime.strptime(row['arrival_datetime'], '%d-%m-%Y %H:%M')
+                arrival_dt = arrival_dt.replace(tzinfo=IST)
         except: pass
 
         # Duty Status: ON DUTY if to_station contains "(NA)", else AVAILABLE
