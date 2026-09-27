@@ -127,28 +127,34 @@ IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 ACTIVE_TUNNEL = "Unknown"
 
 def get_active_proxy():
-    """Return SOCKS proxy host and port if available, checking Office PC first, then Laptop."""
+    """Return SOCKS proxy host and port if available, checking Office PC first, then Laptop, then Mobile."""
     global ACTIVE_TUNNEL
     host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
-    
+
     print("[Proxy] Testing Primary Tunnel (Office PC) on port 1080...", flush=True)
     if is_proxy_available(host, 1080):
         print("[Proxy] Using Office PC proxy on port 1080.", flush=True)
         ACTIVE_TUNNEL = "Office PC (1080)"
         return host, 1080
-        
-    print("[Proxy] Primary tunnel failed. Testing Fallback Tunnel (Laptop) on port 1081...", flush=True)
+
+    print("[Proxy] Primary tunnel failed. Testing Fallback Tunnel 1 (Laptop) on port 1081...", flush=True)
     if is_proxy_available(host, 1081):
         print("[Proxy] Using Laptop proxy on port 1081.", flush=True)
         ACTIVE_TUNNEL = "Laptop (1081)"
         return host, 1081
-        
+
+    print("[Proxy] Fallback 1 failed. Testing Fallback Tunnel 2 (Mobile) on port 1082...", flush=True)
+    if is_proxy_available(host, 1082):
+        print("[Proxy] Using Mobile proxy on port 1082.", flush=True)
+        ACTIVE_TUNNEL = "Mobile (1082)"
+        return host, 1082
+
     if os.environ.get('ENV', 'local').lower() == 'production':
-        print("[Proxy] WARNING: Both tunnels are down. Production environment detected. Blocking direct connection.", flush=True)
+        print("[Proxy] WARNING: All three tunnels are down. Production environment detected. Blocking direct connection.", flush=True)
         ACTIVE_TUNNEL = "Offline"
         return None, None
-        
-    print("[Proxy] WARNING: Both tunnels are down. Local environment detected. Attempting direct connection...", flush=True)
+
+    print("[Proxy] WARNING: All three tunnels are down. Local environment detected. Attempting direct connection...", flush=True)
     ACTIVE_TUNNEL = "Direct (No Proxy)"
     return None, None
 
