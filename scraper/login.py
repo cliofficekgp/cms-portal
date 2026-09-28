@@ -127,14 +127,14 @@ IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 ACTIVE_TUNNEL = "Unknown"
 
 def get_active_proxy():
-    """Return SOCKS proxy host and port if available, checking Office PC first, then Laptop, then Mobile."""
+    """Return SOCKS proxy host and port if available, checking all 4 tunnels in priority order."""
     global ACTIVE_TUNNEL
     host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
 
-    print("[Proxy] Testing Primary Tunnel (Office PC) on port 1080...", flush=True)
+    print("[Proxy] Testing Primary Tunnel (Office PC Old) on port 1080...", flush=True)
     if is_proxy_available(host, 1080):
-        print("[Proxy] Using Office PC proxy on port 1080.", flush=True)
-        ACTIVE_TUNNEL = "Office PC (1080)"
+        print("[Proxy] Using Office PC Old proxy on port 1080.", flush=True)
+        ACTIVE_TUNNEL = "Office PC Old (1080)"
         return host, 1080
 
     print("[Proxy] Primary tunnel failed. Testing Fallback Tunnel 1 (Laptop) on port 1081...", flush=True)
@@ -143,18 +143,24 @@ def get_active_proxy():
         ACTIVE_TUNNEL = "Laptop (1081)"
         return host, 1081
 
-    print("[Proxy] Fallback 1 failed. Testing Fallback Tunnel 2 (Mobile) on port 1082...", flush=True)
+    print("[Proxy] Fallback 1 failed. Testing Fallback Tunnel 2 (Office PC New) on port 1082...", flush=True)
     if is_proxy_available(host, 1082):
-        print("[Proxy] Using Mobile proxy on port 1082.", flush=True)
-        ACTIVE_TUNNEL = "Mobile (1082)"
+        print("[Proxy] Using Office PC New proxy on port 1082.", flush=True)
+        ACTIVE_TUNNEL = "Office PC New (1082)"
         return host, 1082
 
+    print("[Proxy] Fallback 2 failed. Testing Fallback Tunnel 3 (TLC Computer) on port 1083...", flush=True)
+    if is_proxy_available(host, 1083):
+        print("[Proxy] Using TLC Computer proxy on port 1083.", flush=True)
+        ACTIVE_TUNNEL = "TLC Computer (1083)"
+        return host, 1083
+
     if os.environ.get('ENV', 'local').lower() == 'production':
-        print("[Proxy] WARNING: All three tunnels are down. Production environment detected. Blocking direct connection.", flush=True)
+        print("[Proxy] WARNING: All four tunnels are down. Production environment detected. Blocking direct connection.", flush=True)
         ACTIVE_TUNNEL = "Offline"
         return None, None
 
-    print("[Proxy] WARNING: All three tunnels are down. Local environment detected. Attempting direct connection...", flush=True)
+    print("[Proxy] WARNING: All four tunnels are down. Local environment detected. Attempting direct connection...", flush=True)
     ACTIVE_TUNNEL = "Direct (No Proxy)"
     return None, None
 

@@ -224,23 +224,33 @@ def is_proxy_available(host, port, retries=2, delay=2):
 def get_active_proxy():
     global ACTIVE_TUNNEL
     host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
-    
-    print("[RTIS-Proxy] Testing Primary Tunnel on port 1080...", flush=True)
+
+    print("[RTIS-Proxy] Testing Primary Tunnel (Office PC Old) on port 1080...", flush=True)
     if is_proxy_available(host, 1080):
-        ACTIVE_TUNNEL = "Office PC (1080)"
+        ACTIVE_TUNNEL = "Office PC Old (1080)"
         return host, 1080
-        
-    print("[RTIS-Proxy] Testing Fallback Tunnel on port 1081...", flush=True)
+
+    print("[RTIS-Proxy] Testing Fallback Tunnel 1 (Laptop) on port 1081...", flush=True)
     if is_proxy_available(host, 1081):
         ACTIVE_TUNNEL = "Laptop (1081)"
         return host, 1081
-        
+
+    print("[RTIS-Proxy] Testing Fallback Tunnel 2 (Office PC New) on port 1082...", flush=True)
+    if is_proxy_available(host, 1082):
+        ACTIVE_TUNNEL = "Office PC New (1082)"
+        return host, 1082
+
+    print("[RTIS-Proxy] Testing Fallback Tunnel 3 (TLC Computer) on port 1083...", flush=True)
+    if is_proxy_available(host, 1083):
+        ACTIVE_TUNNEL = "TLC Computer (1083)"
+        return host, 1083
+
     if os.environ.get('ENV', 'local').lower() == 'production':
-        print("[RTIS-Proxy] WARNING: Both tunnels down. Production environment detected. Blocking direct connection.", flush=True)
+        print("[RTIS-Proxy] WARNING: All four tunnels down. Production environment detected. Blocking direct connection.", flush=True)
         ACTIVE_TUNNEL = "Offline"
         return None, None
-        
-    print("[RTIS-Proxy] WARNING: Both tunnels down. Local environment detected. Attempting direct connection...", flush=True)
+
+    print("[RTIS-Proxy] WARNING: All four tunnels down. Local environment detected. Attempting direct connection...", flush=True)
     ACTIVE_TUNNEL = "Direct (No Proxy)"
     return None, None
 

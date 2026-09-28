@@ -35,6 +35,36 @@ gosu appuser bash -c '
   done
 ' &
 
+# ── Fallback SOCKS5 tunnel → office new computer (100.110.163.89) on port 1082 ─────────────
+gosu appuser bash -c '
+  while true; do
+    ssh -D 127.0.0.1:1082 -N \
+      -o StrictHostKeyChecking=no \
+      -o ServerAliveInterval=30 \
+      -o ServerAliveCountMax=3 \
+      -o ExitOnForwardFailure=yes \
+      -i /home/appuser/.ssh/cms_tunnel_key \
+      admin@100.110.163.89
+    echo "[Tunnel-1082] office new computer SSH tunnel dropped, retrying in 5s..."
+    sleep 5
+  done
+' &
+
+# ── Fallback SOCKS5 tunnel → office computer in TLC (100.114.255.7) on port 1082 ─────────────
+gosu appuser bash -c '
+  while true; do
+    ssh -D 127.0.0.1:1083 -N \
+      -o StrictHostKeyChecking=no \
+      -o ServerAliveInterval=30 \
+      -o ServerAliveCountMax=3 \
+      -o ExitOnForwardFailure=yes \
+      -i /home/appuser/.ssh/cms_tunnel_key \
+      hp@100.114.255.7
+    echo "[Tunnel-1083] TLC computer SSH tunnel dropped, retrying in 5s..."
+    sleep 5
+  done
+' &
+
 # Wait until the SOCKS5 tunnel is actually listening on port 1080 (up to 60s)
 echo "Waiting for SOCKS5 tunnel on port 1080..."
 for i in $(seq 1 30); do
