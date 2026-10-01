@@ -245,12 +245,17 @@ def get_active_proxy():
         ACTIVE_TUNNEL = "TLC Computer (1083)"
         return host, 1083
 
+    print("[RTIS-Proxy] Testing Fallback Tunnel 4 (CLI HQ Main) on port 1084...", flush=True)
+    if is_proxy_available(host, 1084):
+        ACTIVE_TUNNEL = "CLI HQ Main (1084)"
+        return host, 1084
+
     if os.environ.get('ENV', 'local').lower() == 'production':
-        print("[RTIS-Proxy] WARNING: All four tunnels down. Production environment detected. Blocking direct connection.", flush=True)
+        print("[RTIS-Proxy] WARNING: All five tunnels down. Production environment detected. Blocking direct connection.", flush=True)
         ACTIVE_TUNNEL = "Offline"
         return None, None
 
-    print("[RTIS-Proxy] WARNING: All four tunnels down. Local environment detected. Attempting direct connection...", flush=True)
+    print("[RTIS-Proxy] WARNING: All five tunnels down. Local environment detected. Attempting direct connection...", flush=True)
     ACTIVE_TUNNEL = "Direct (No Proxy)"
     return None, None
 

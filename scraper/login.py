@@ -127,7 +127,7 @@ IST = zoneinfo.ZoneInfo("Asia/Kolkata")
 ACTIVE_TUNNEL = "Unknown"
 
 def get_active_proxy():
-    """Return SOCKS proxy host and port if available, checking all 4 tunnels in priority order."""
+    """Return SOCKS proxy host and port if available, checking all 5 tunnels in priority order."""
     global ACTIVE_TUNNEL
     host = os.environ.get("SOCKS_PROXY_HOST", "127.0.0.1")
 
@@ -155,12 +155,18 @@ def get_active_proxy():
         ACTIVE_TUNNEL = "TLC Computer (1083)"
         return host, 1083
 
+    print("[Proxy] Fallback 3 failed. Testing Fallback Tunnel 4 (CLI HQ Main) on port 1084...", flush=True)
+    if is_proxy_available(host, 1084):
+        print("[Proxy] Using CLI HQ Main proxy on port 1084.", flush=True)
+        ACTIVE_TUNNEL = "CLI HQ Main (1084)"
+        return host, 1084
+
     if os.environ.get('ENV', 'local').lower() == 'production':
-        print("[Proxy] WARNING: All four tunnels are down. Production environment detected. Blocking direct connection.", flush=True)
+        print("[Proxy] WARNING: All five tunnels are down. Production environment detected. Blocking direct connection.", flush=True)
         ACTIVE_TUNNEL = "Offline"
         return None, None
 
-    print("[Proxy] WARNING: All four tunnels are down. Local environment detected. Attempting direct connection...", flush=True)
+    print("[Proxy] WARNING: All five tunnels are down. Local environment detected. Attempting direct connection...", flush=True)
     ACTIVE_TUNNEL = "Direct (No Proxy)"
     return None, None
 

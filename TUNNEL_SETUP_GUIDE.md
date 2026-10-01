@@ -1,6 +1,6 @@
-# 4-Tunnel SOCKS5 Setup Guide
-**Date**: 2026-09-28  
-**Purpose**: Configure 4 independent SOCKS tunnels for KGP Crew Monitoring System
+# 5-Tunnel SOCKS5 Setup Guide
+**Date**: 2026-10-01  
+**Purpose**: Configure 5 independent SOCKS tunnels for KGP Crew Monitoring System
 
 ---
 
@@ -12,9 +12,10 @@ Oracle VM (103.211.65.148)
     ├─ Port 1080 → Office PC Old (100.124.187.97) - kgplo user
     ├─ Port 1081 → Laptop (100.85.52.9) - hp user
     ├─ Port 1082 → Office PC New (100.110.163.89) - admin user
-    └─ Port 1083 → TLC Computer (100.114.255.7) - hp user
+    ├─ Port 1083 → TLC Computer (100.114.255.7) - hp user
+    └─ Port 1084 → CLI HQ Main (100.127.133.72) - cliof user
 
-Python scraper tests ports in order: 1080 → 1081 → 1082 → 1083
+Python scraper tests ports in order: 1080 → 1081 → 1082 → 1083 → 1084
 First working tunnel is used automatically.
 ```
 
@@ -23,14 +24,15 @@ First working tunnel is used automatically.
 ## STEP 1: Update Python Code ✅ DONE
 
 **Files Modified**:
-- `scraper/login.py` - Updated `get_active_proxy()` to check all 4 ports
-- `scraper/rtis_scraper.py` - Updated `get_active_proxy()` to check all 4 ports
+- `scraper/login.py` - Updated `get_active_proxy()` to check all 5 ports
+- `scraper/rtis_scraper.py` - Updated `get_active_proxy()` to check all 5 ports
 
 **Changes**:
 - Added port 1082 check (Office PC New)
 - Added port 1083 check (TLC Computer)
+- Added port 1084 check (CLI HQ Main)
 - Updated tunnel names in logs
-- Changed "All three tunnels" → "All four tunnels"
+- Changed "All four tunnels" → "All five tunnels"
 
 ---
 
@@ -106,9 +108,19 @@ Repeat same steps as Device 1, but:
 
 ---
 
+### Device 5: CLI HQ Main (100.127.133.72)
+**User**: `cliof`  
+**Port**: Will bind to Oracle VM port 1084
+
+Repeat same steps as Device 1, but:
+- Login as `cliof` user
+- Test: `ssh cliof@100.127.133.72` from Oracle VM
+
+---
+
 ## STEP 3: Oracle VM SSH Key Setup
 
-**Critical**: All 4 devices must accept the SAME SSH key from Oracle VM.
+**Critical**: All 5 devices must accept the SAME SSH key from Oracle VM.
 
 1. **Check if key exists** (on Oracle VM as ubuntu user):
    ```bash
@@ -121,7 +133,7 @@ Repeat same steps as Device 1, but:
    chmod 600 /home/ubuntu/.ssh/cms_tunnel_key
    ```
 
-3. **Copy public key to ALL 4 devices**:
+3. **Copy public key to ALL 5 devices**:
    
    **Get the public key**:
    ```bash
@@ -160,9 +172,10 @@ Repeat same steps as Device 1, but:
    ssh -i /home/ubuntu/.ssh/cms_tunnel_key hp@100.85.52.9 echo "Test 2 OK"
    ssh -i /home/ubuntu/.ssh/cms_tunnel_key admin@100.110.163.89 echo "Test 3 OK"
    ssh -i /home/ubuntu/.ssh/cms_tunnel_key hp@100.114.255.7 echo "Test 4 OK"
+   ssh -i /home/ubuntu/.ssh/cms_tunnel_key cliof@100.127.133.72 echo "Test 5 OK"
    ```
    
-   **All 4 should print "Test N OK" WITHOUT asking for password**.
+   **All 5 should print "Test N OK" WITHOUT asking for password**.
 
 ---
 
@@ -201,32 +214,35 @@ Repeat same steps as Device 1, but:
 
 **After deployment, check logs in Coolify**:
 
-1. **Tunnel startup logs** (should show all 4 starting):
+1. **Tunnel startup logs** (should show all 5 starting):
    ```
    [Tunnel-1080] Office PC SSH tunnel dropped, retrying in 5s...
    [Tunnel-1081] Laptop SSH tunnel dropped, retrying in 5s...
    [Tunnel-1082] office new computer SSH tunnel dropped, retrying in 5s...
    [Tunnel-1083] TLC computer SSH tunnel dropped, retrying in 5s...
+   [Tunnel-1084] CLI HQ Main SSH tunnel dropped, retrying in 5s...
    Waiting for SOCKS5 tunnel on port 1080...
    Tunnel ready after Xs.
    ```
 
 2. **Inside the container** (via Coolify shell or `docker exec`):
    ```bash
-   # Check all 4 ports are listening
-   netstat -tuln | grep -E '1080|1081|1082|1083'
+   # Check all 5 ports are listening
+   netstat -tuln | grep -E '1080|1081|1082|1083|1084'
    
    # Should show:
    # tcp  0  0  127.0.0.1:1080  0.0.0.0:*  LISTEN
    # tcp  0  0  127.0.0.1:1081  0.0.0.0:*  LISTEN
    # tcp  0  0  127.0.0.1:1082  0.0.0.0:*  LISTEN
    # tcp  0  0  127.0.0.1:1083  0.0.0.0:*  LISTEN
+   # tcp  0  0  127.0.0.1:1084  0.0.0.0:*  LISTEN
    
    # Test tunnel connectivity
    curl --socks5 127.0.0.1:1080 https://cms.indianrail.gov.in -I --max-time 10
    curl --socks5 127.0.0.1:1081 https://cms.indianrail.gov.in -I --max-time 10
    curl --socks5 127.0.0.1:1082 https://cms.indianrail.gov.in -I --max-time 10
    curl --socks5 127.0.0.1:1083 https://cms.indianrail.gov.in -I --max-time 10
+   curl --socks5 127.0.0.1:1084 https://cms.indianrail.gov.in -I --max-time 10
    ```
 
 3. **Check scraper logs** (via Coolify logs or Flask app logs):
@@ -348,9 +364,9 @@ echo $ENV
 - ✅ Scraper tests tunnels every cycle and auto-switches
 
 ### Weekly (Manual)
-1. Check all 4 devices are online in Tailscale:
+1. Check all 5 devices are online in Tailscale:
    ```bash
-   tailscale status | grep -E '100.124.187.97|100.85.52.9|100.110.163.89|100.114.255.7'
+   tailscale status | grep -E '100.124.187.97|100.85.52.9|100.110.163.89|100.114.255.7|100.127.133.72'
    ```
 
 2. Verify tunnel health in Coolify logs:
@@ -365,7 +381,7 @@ echo $ENV
    docker exec -it <container_name> bash
    
    # Test each port
-   for port in 1080 1081 1082 1083; do
+   for port in 1080 1081 1082 1083 1084; do
      echo "Testing port $port..."
      curl --socks5 127.0.0.1:$port https://cms.indianrail.gov.in -I --max-time 10
    done
@@ -381,10 +397,10 @@ echo $ENV
 
 ## Emergency Procedures
 
-### All 4 Tunnels Down
+### All 5 Tunnels Down
 
 **Immediate Actions**:
-1. Check Tailscale status on all 4 devices
+1. Check Tailscale status on all 5 devices
 2. Restart Tailscale daemon on devices if needed
 3. Reboot devices if necessary
 4. Check Oracle VM Tailscale: `tailscale status`
@@ -445,15 +461,16 @@ tail -f /var/log/app.log
                     │  │                                    │  │
                     │  │  get_active_proxy()                │  │
                     │  │    ↓                               │  │
-                    │  │  Tests 1080→1081→1082→1083         │  │
+                    │  │  Tests 1080→1081→1082→1083→1084    │  │
                     │  └─────────┬──────────────────────────┘  │
                     │            │                             │
                     │  ┌─────────┴──────────────────────────┐  │
-                    │  │  4 SSH Tunnels (background loops)  │  │
+                    │  │  5 SSH Tunnels (background loops)  │  │
                     │  │  - ssh -D 127.0.0.1:1080 kgplo@... │  │
                     │  │  - ssh -D 127.0.0.1:1081 hp@...    │  │
                     │  │  - ssh -D 127.0.0.1:1082 admin@... │  │
                     │  │  - ssh -D 127.0.0.1:1083 hp@...    │  │
+                    │  │  - ssh -D 127.0.0.1:1084 cliof@... │  │
                     │  └────────────────────────────────────┘  │
                     └──────────┬──────────────────────────────┘
                                │ Tailscale VPN (encrypted)
@@ -461,13 +478,13 @@ tail -f /var/log/app.log
         │                      │                                   │
         │                      │                                   │
    ┌────▼─────┐         ┌─────▼──────┐       ┌──────▼─────┐  ┌───▼────────┐
-   │ Office   │         │  Laptop    │       │ Office     │  │ TLC        │
-   │ PC Old   │         │ (Home)     │       │ PC New     │  │ Computer   │
-   │ Exit Node│         │ Exit Node  │       │ Exit Node  │  │ Exit Node  │
-   │ (1080)   │         │ (1081)     │       │ (1082)     │  │ (1083)     │
-   └────┬─────┘         └─────┬──────┘       └──────┬─────┘  └───┬────────┘
-        │                     │                     │            │
-        └─────────────────────┴─────────────────────┴────────────┘
+   │ Office   │  │  Laptop    │  │ Office     │  │ TLC        │  │ CLI HQ     │
+   │ PC Old   │  │ (Home)     │  │ PC New     │  │ Computer   │  │ Main       │
+   │ Exit Node│  │ Exit Node  │  │ Exit Node  │  │ Exit Node  │  │ Exit Node  │
+   │ (1080)   │  │ (1081)     │  │ (1082)     │  │ (1083)     │  │ (1084)     │
+   └────┬─────┘  └─────┬──────┘  └──────┬─────┘  └───┬────────┘  └───┬────────┘
+        │              │               │            │              │
+        └──────────────┴───────────────┴────────────┴──────────────┘
                                       │
                                       ▼
                           ┌───────────────────────┐
@@ -485,8 +502,8 @@ tail -f /var/log/app.log
 **Solution**: Always `pkill` or `systemctl stop` before restarting
 
 ### ❌ Mistake 2: Python Code Missing Port
-**What happened**: Added port 1083 in Docker but forgot to update Python  
-**Solution**: ✅ Updated both `login.py` AND `rtis_scraper.py`
+**What happened**: Added port in Docker but forgot to update Python  
+**Solution**: ✅ Always update both `login.py` AND `rtis_scraper.py` when adding tunnels
 
 ### ❌ Mistake 3: SSH Key Permission Mismatch
 **What happened**: Key at `/root/.ssh/` but service ran as `ubuntu`  
@@ -494,7 +511,7 @@ tail -f /var/log/app.log
 
 ### ❌ Mistake 4: Device Offline = Silent Failure
 **What happened**: Mobile locked, Tailscale killed, tunnel silently timed out  
-**Solution**: Monitor all 4 devices, ensure they're always-on or have Wake-on-LAN
+**Solution**: Monitor all 5 devices, ensure they're always-on or have Wake-on-LAN
 
 ### ❌ Mistake 5: Wrong Tunnel Labels in Logs
 **What happened**: Logs said "Mobile" but it was "Office PC New"  
@@ -504,9 +521,9 @@ tail -f /var/log/app.log
 
 ## Success Criteria
 
-✅ All 4 devices show "active" in `tailscale status`  
-✅ All 4 devices accept passwordless SSH from Oracle VM  
-✅ All 4 ports (1080-1083) show LISTEN in `netstat -tuln`  
+✅ All 5 devices show "active" in `tailscale status`  
+✅ All 5 devices accept passwordless SSH from Oracle VM  
+✅ All 5 ports (1080-1084) show LISTEN in `netstat -tuln`  
 ✅ Scraper logs show successful proxy usage  
 ✅ CMS scraper completes full cycle without blocks  
 ✅ Failover works: Kill primary tunnel → scraper switches to next working tunnel within 1 cycle
