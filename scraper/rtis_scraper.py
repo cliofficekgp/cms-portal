@@ -818,6 +818,17 @@ def main_loop():
                                     token_expired = True
                                     break
 
+                        except requests.exceptions.ConnectionError as ce:
+                            # Tunnel died mid-cycle — break out to re-select proxy and re-login
+                            err_str = str(ce).lower()
+                            if 'connection refused' in err_str or 'socks' in err_str:
+                                logger.error(f"  Proxy connection failed for loco {loco}: {ce}")
+                                logger.error("  Breaking inner loop to trigger proxy failover and re-authentication...")
+                                token_expired = True  # Force outer loop to re-authenticate with fresh proxy
+                                break
+                            else:
+                                # Other connection errors — log and continue to next loco
+                                logger.error(f"  ConnectionError querying loco {loco}: {ce}", exc_info=True)
                         except Exception as e:
                             logger.error(f"  Exception querying loco {loco}: {e}", exc_info=True)
 
