@@ -545,10 +545,20 @@ def main_loop():
                     interruptible_sleep(1)
 
                 if not redirected:
-                    logger.error(f"Failed to redirect to RTIS Dashboard. Current URL: {driver.current_url}")
+                    current_url = driver.current_url
+                    logger.error(f"Failed to redirect to RTIS Dashboard. Current URL: {current_url}")
                     if invalid_otp:
                         # OTP was explicitly rejected — already deleted above
                         send_state_to_admin('error', 'OTP was invalid/expired. Please provide fresh OTP.')
+                    elif "resetPassword" in current_url or "changePassword" in current_url or "reset_password" in current_url:
+                        # Portal is forcing a mandatory password reset — cannot proceed until changed
+                        logger.error("RTIS portal is forcing a password reset. Scraper cannot proceed until password is updated.")
+                        if os.path.exists(otp_file): os.remove(otp_file)
+                        send_state_to_admin('error', '⚠️ RTIS Portal requires mandatory password reset. Please log in to the RTIS portal manually, change the password, then update credentials in Settings.')
+                        driver.quit()
+                        # Wait 10 minutes before retrying so we don't hammer the portal
+                        if interruptible_sleep(600): sys.exit(0)
+                        continue
                     else:
                         # Could be slow network, RTIS server issue, etc. — keep the OTP file for retry
                         logger.info("Redirect timed out but OTP may still be valid. Keeping saved OTP for retry.")
