@@ -6,7 +6,7 @@ from datetime import datetime
 import hmac
 from flask import Blueprint, request, jsonify
 from webapp.database import get_db
-from webapp.extensions import IST, API_SECRET, DB_WRITE_LOCK, scraper_state, rtis_state
+from webapp.extensions import IST, API_SECRET, DB_WRITE_LOCK, scraper_state, rtis_state, cli_matrix_data
 from webapp.utils import parse_dt, archive_to_duty_log
 
 api_internal_bp = Blueprint('api_internal', __name__)
@@ -417,6 +417,26 @@ def api_sync_cli_movements():
     conn.commit()
     conn.close()
     return jsonify({'status': 'success', 'count': len(payload)})
+
+
+@api_internal_bp.route('/api/sync_cli_matrix', methods=['POST'])
+def api_sync_cli_matrix():
+    """Sync CLI Matrix data (Total LP count and FP Overdue) from CMS scraper."""
+    if not require_api_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True)
+    if not payload or 'cli_matrix' not in payload:
+        return jsonify({'error': 'Invalid payload'}), 400
+
+    # Import here to avoid circular import
+    from webapp.extensions import cli_matrix_data
+
+    # Update the global in-memory storage (no database persistence)
+    cli_matrix_data.clear()
+    cli_matrix_data.update(payload['cli_matrix'])
+
+    return jsonify({'status': 'success', 'count': len(cli_matrix_data)})
 
 
 # ---------------------------------------------------------------------------

@@ -77,3 +77,7 @@ cli_state = {
     'last_run': None,
     'last_count': 0
 }
+
+# Global in-memory storage for CLI Matrix data (Total LP count and FP Overdue)
+# Structure: { 'KGP0022': {'lp_count': 45, 'fp_overdue': 3}, ... }
+cli_matrix_data = {}

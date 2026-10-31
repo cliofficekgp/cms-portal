@@ -136,6 +136,8 @@
                 <tr>
                     <th data-col="hq_code">HQ</th>
                     <th data-col="name">Name</th>
+                    <th data-col="lp_count">Total LP</th>
+                    <th data-col="fp_overdue">FP Overdue</th>
                     <th data-col="duty_status">Duty Status</th>
                     <th data-col="at">AT</th>
                     <th data-col="train_no">Train No</th>
@@ -155,6 +157,8 @@
                     <tr class="row-{{ 'onduty' if cli.duty_status == 'ON DUTY' else 'available' }}" data-hq="{{ cli.hq_code }}">
                         <td class="td-center">{{ cli.hq_code }}</td>
                         <td class="name-cell">{{ cli.name }}</td>
+                        <td class="td-center" style="font-weight:600;color:#60a5fa;">{{ cli.lp_count if cli.lp_count else '—' }}</td>
+                        <td class="td-center" style="font-weight:600;color:{% if cli.fp_overdue > 0 %}#f87171{% else %}#86efac{% endif %};">{{ cli.fp_overdue if cli.fp_overdue else '—' }}</td>
                         <td class="td-center">
                             <span class="duty-badge duty-{{ 'onduty' if cli.duty_status == 'ON DUTY' else 'available' }}">{{ cli.duty_status }}</span>
                         </td>
@@ -194,7 +198,7 @@
                     {% endfor %}
                 {% else %}
                     <tr class="empty-row">
-                        <td colspan="8">No CLI movement data available</td>
+                        <td colspan="15">No CLI movement data available</td>
                     </tr>
                 {% endif %}
             </tbody>

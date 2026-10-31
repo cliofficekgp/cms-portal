@@ -570,6 +570,110 @@ def sync_cli_movements(session_obj):
 
     return False
 
+def sync_cli_matrix(session_obj):
+    """Fetch CLI Matrix (Total LP count and FP Overdue) and sync to backend."""
+    send_state_to_admin('running', 'Fetching CLI Matrix...')
+
+    # Build XML payload for CLI Matrix (Loco Inspector Matrix)
+    xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?><CMSPublishXML baseLanguage="string" transLanguage="string"><CMSREPORT action="REP" relationship="string" transLanguage="string"><zone>SER</zone><division>KGP</division><lobby>KGP</lobby><currentReportName><![CDATA[CLI Matrix (in CDATA)]]></currentReportName><desig1>ALP</desig1><desig2>SALP</desig2><desig3>LPG</desig3><desig4>SHT</desig4><desig5>SSHT</desig5><desig6>LPP</desig6><desig7>LPM</desig7><desig8>MMAN</desig8><desig9>false</desig9><desig10>false</desig10><desig11>false</desig11><desig12>false</desig12><abnormality1>COMMERCIAL</abnormality1><abnormality2>false</abnormality2><abnormality3>false</abnormality3><abnormality4>false</abnormality4><abnormality5>false</abnormality5><abnormality6>false</abnormality6><abnormality7>false</abnormality7><abnormality8>false</abnormality8><abnormality9>false</abnormality9><abnormality10>false</abnormality10><abnormality11>false</abnormality11><abnormality12>false</abnormality12><abnormality13>false</abnormality13><rlevel>DIVISION</rlevel><durationtype>FORTNIGHT</durationtype><cadre>E','M','B</cadre><active>Active</active><designation>PILOT</designation><desigSelect>OFFICIATING</desigSelect></CMSREPORT></CMSPublishXML>"""
+
+    url = 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/crew/LIGradingAction.do?hmode=locoInspectorMatrix'
+    headers = {
+        'Accept': 'text/html, */*; q=0.01',
+        'Origin': 'https://cms.indianrail.gov.in',
+        'Referer': 'https://cms.indianrail.gov.in/CMSREPORT/JSP/rpt/LoginAction.do?hmode=skipMapHrmsId&isResponsive=Y',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+    }
+
+    data = {'XML': xml_payload, 'lobby': 'KGP', 'lobbyList': 'SER-KGP-KGP'}
+
+    try:
+        resp = session_obj.post(url, headers=headers, data=data, timeout=30)
+        if resp.status_code == 200:
+            resp_text_lower = resp.text.lower()
+            if "session expire page" in resp_text_lower or "loginform" in resp_text_lower or "jcaptcha" in resp_text_lower:
+                print("CLI Matrix Sync: session expired/invalid (login page returned)")
+                return False
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            table = soup.find('table', id='locoInspectorMatrixDIVISIONTable')
+            if not table:
+                print("CLI Matrix Sync: 'locoInspectorMatrixDIVISIONTable' table not found in response")
+                return False
+
+            tbody = table.find('tbody')
+            if not tbody:
+                print("CLI Matrix Sync: table found but no <tbody>")
+                return False
+
+            cli_matrix_records = {}  # { cli_id: { 'lp_count': int, 'fp_overdue': int } }
+
+            for row in tbody.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) < 7:
+                    continue
+
+                try:
+                    # Column structure: S.No, CLI ID, CLI name, Designation, Crew Allotted, FP Data, FP Overdue count, ...
+                    # FP Overdue is typically in column 6 (0-indexed), containing counts/links
+                    cli_id = cols[1].get_text(strip=True)
+                    desig = cols[3].get_text(strip=True)
+
+                    # Extract FP Overdue count (column 6, parse number before any '/' or non-digit chars)
+                    fp_overdue_text = cols[6].get_text(strip=True)
+                    fp_overdue = 0
+                    if fp_overdue_text and fp_overdue_text != '—':
+                        # Extract first number from the text
+                        import re
+                        match = re.search(r'\d+', fp_overdue_text)
+                        if match:
+                            fp_overdue = int(match.group())
+
+                    # Track Total LP designations (LPG, LPM, LPP, MMAN)
+                    if cli_id not in cli_matrix_records:
+                        cli_matrix_records[cli_id] = {'lp_count': 0, 'fp_overdue': 0}
+
+                    if desig in ['LPG', 'LPM', 'LPP', 'MMAN']:
+                        # Extract crew allotted count (column 4)
+                        crew_count_text = cols[4].get_text(strip=True)
+                        crew_count = 0
+                        if crew_count_text and crew_count_text != '—':
+                            import re
+                            match = re.search(r'\d+', crew_count_text)
+                            if match:
+                                crew_count = int(match.group())
+                        cli_matrix_records[cli_id]['lp_count'] += crew_count
+
+                    # Update FP Overdue (take max or last encountered for this CLI)
+                    if fp_overdue > cli_matrix_records[cli_id]['fp_overdue']:
+                        cli_matrix_records[cli_id]['fp_overdue'] = fp_overdue
+
+                except (IndexError, ValueError) as e:
+                    print(f"CLI Matrix Sync: error parsing row: {e}")
+                    continue
+
+            if cli_matrix_records:
+                send_state_to_admin('running', 'Syncing CLI Matrix data to backend...')
+                sync_resp = requests.post(
+                    f"{FLASK_API_URL}/sync_cli_matrix",
+                    json={'cli_matrix': cli_matrix_records},
+                    headers={'X-API-Secret': API_SECRET},
+                    timeout=15
+                )
+                if sync_resp.status_code == 200:
+                    print(f"Successfully synced CLI Matrix data for {len(cli_matrix_records)} CLIs")
+                    return True
+                else:
+                    print(f"CLI Matrix Sync API returned {sync_resp.status_code}: {sync_resp.text[:300]}")
+            else:
+                print("CLI Matrix Sync: table found but produced 0 records after parsing")
+
+    except Exception as e:
+        print(f"CLI Matrix Sync failed: {e}")
+
+    return False
+
 # -----------------------------------------------------------------------------
 # Main Loop
 # -----------------------------------------------------------------------------
@@ -667,6 +771,11 @@ def main_loop():
                 cli_ok = sync_cli_movements(session)
                 if not cli_ok:
                     print("[main_loop] CLI Movement sync did not succeed this cycle (see sync_cli_movements logs above).")
+
+            if cookie_valid:
+                cli_matrix_ok = sync_cli_matrix(session)
+                if not cli_matrix_ok:
+                    print("[main_loop] CLI Matrix sync did not succeed this cycle (see sync_cli_matrix logs above).")
 
             if cookie_valid:
                 sleep_seconds = random_cycle_sleep_seconds(25, 35)

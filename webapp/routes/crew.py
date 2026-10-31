@@ -289,7 +289,7 @@ def public_crew_list():
 def public_cli_dashboard():
     """Public read-only CLI Movement Dashboard — no login required."""
     from datetime import datetime
-    from webapp.extensions import IST
+    from webapp.extensions import IST, cli_matrix_data
 
     conn = get_db()
     rows = conn.execute('SELECT * FROM cli_movements').fetchall()
@@ -377,10 +377,20 @@ def public_cli_dashboard():
             rtis_loc = rtis_locations[loco_no]['loc']
             rtis_loc_time = rtis_locations[loco_no]['time']
 
+        # Get CLI Matrix data (Total LP count and FP Overdue) from in-memory storage
+        cli_id = row['cli_id']
+        lp_count = 0
+        fp_overdue = 0
+        if cli_id in cli_matrix_data:
+            lp_count = cli_matrix_data[cli_id].get('lp_count', 0)
+            fp_overdue = cli_matrix_data[cli_id].get('fp_overdue', 0)
+
         cli_data.append({
             'cli_id': row['cli_id'],
             'name': row['name'],
             'hq_code': row['hq_code'],
+            'lp_count': lp_count,
+            'fp_overdue': fp_overdue,
             'duty_status': duty_status,
             'at': at_field,
             'rest_hrs': rest_hrs,
