@@ -616,12 +616,12 @@ def sync_cli_matrix(session_obj):
 
                 try:
                     # Column structure: S.No, CLI ID, CLI name, Designation, Crew Allotted, FP Data, FP Overdue count, ...
-                    # FP Overdue is typically in column 6 (0-indexed), containing counts/links
+                    # FP Overdue is typically in column 9 (0-indexed), containing counts/links
                     cli_id = cols[1].get_text(strip=True)
                     desig = cols[3].get_text(strip=True)
 
-                    # Extract FP Overdue count (column 6, parse number before any '/' or non-digit chars)
-                    fp_overdue_text = cols[6].get_text(strip=True)
+                    # Extract FP Overdue count (column 9, parse number before any '/' or non-digit chars)
+                    fp_overdue_text = cols[9].get_text(strip=True)
                     fp_overdue = 0
                     if fp_overdue_text and fp_overdue_text != '—':
                         # Extract first number from the text
